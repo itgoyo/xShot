@@ -1,0 +1,9 @@
+.frames/
+build/
+dist/
+*.o
+.DS_Store
+xcuserdata/
+*.xcuserstate
+xShot/Resources/AppIcon.iconset/
+

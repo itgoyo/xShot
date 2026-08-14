@@ -1,0 +1,62 @@
+name: Release DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 1.0.0 (no v prefix). Leave empty to use Info.plist."
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            V="${{ github.event.inputs.version }}"
+            if [[ -z "$V" ]]; then
+              V="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' xShot/Info.plist)"
+            fi
+          else
+            V="${GITHUB_REF_NAME#v}"
+          fi
+          if [[ ! "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version: $V"
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          chmod +x scripts/set-version.sh scripts/create-dmg.sh
+          ./scripts/set-version.sh "$V"
+
+      - name: Build app and DMG
+        run: |
+          make
+          make dmg
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          NOTES="## xShot ${V}
+
+          下载 \`xShot-${V}.dmg\`，打开后将 xShot.app 拖入 Applications 即可。
+
+          - 需要 macOS 13 或更高
+          - 首次截图需在 系统设置 → 隐私与安全性 → 屏幕录制 中授权"
+          gh release create "v${V}" \
+            --title "xShot ${V}" \
+            --notes "$NOTES" \
+            dist/xShot-${V}.dmg
