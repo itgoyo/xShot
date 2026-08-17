@@ -185,7 +185,6 @@ static NSColor *XSCardFill(void) {
             iv.image = img;
             iv.contentTintColor = [NSColor colorWithCalibratedRed:0.45 green:0.35 blue:0.95 alpha:1];
             [iconWrap addSubview:iv];
-            // color dots
             NSArray *colors = @[
                 [NSColor colorWithCalibratedRed:0.95 green:0.35 blue:0.35 alpha:1],
                 [NSColor colorWithCalibratedRed:0.35 green:0.75 blue:0.45 alpha:1],
@@ -206,6 +205,12 @@ static NSColor *XSCardFill(void) {
             iv.image = [NSImage imageWithSystemSymbolName:@"pin.fill" accessibilityDescription:nil];
             iv.contentTintColor = [NSColor colorWithCalibratedRed:0.85 green:0.55 blue:0.15 alpha:1];
             [iconWrap addSubview:iv];
+        } else if (action == XSHotKeyActionPlainCapture) {
+            iconWrap.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.92 green:0.95 blue:0.92 alpha:1].CGColor;
+            NSImageView *iv = [[NSImageView alloc] initWithFrame:NSMakeRect(6, 6, 24, 24)];
+            iv.image = [NSImage imageWithSystemSymbolName:@"crop" accessibilityDescription:nil];
+            iv.contentTintColor = [NSColor colorWithCalibratedRed:0.25 green:0.55 blue:0.35 alpha:1];
+            [iconWrap addSubview:iv];
         } else {
             iconWrap.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.90 green:0.95 blue:1.0 alpha:1].CGColor;
             NSImageView *iv = [[NSImageView alloc] initWithFrame:NSMakeRect(6, 6, 24, 24)];
@@ -222,7 +227,8 @@ static NSColor *XSCardFill(void) {
 
         NSString *subtitle = @"";
         switch (action) {
-            case XSHotKeyActionCapture: subtitle = @"框选或窗口截图"; break;
+            case XSHotKeyActionCapture: subtitle = @"截图后套背景进入编辑器"; break;
+            case XSHotKeyActionPlainCapture: subtitle = @"框选后直接复制原图"; break;
             case XSHotKeyActionPin: subtitle = @"贴剪贴板中的图片"; break;
             case XSHotKeyActionColorPicker: subtitle = @"点击复制 #RRGGBB 色值"; break;
         }
@@ -236,7 +242,7 @@ static NSColor *XSCardFill(void) {
         _field.onChange = onChange;
         [self addSubview:_field];
 
-        if (action != XSHotKeyActionColorPicker) {
+        if (action != XSHotKeyActionPin) {
             NSView *sep = [[NSView alloc] initWithFrame:NSMakeRect(64, 63, width - 80, 1)];
             sep.wantsLayer = YES;
             sep.layer.backgroundColor = [NSColor.separatorColor colorWithAlphaComponent:0.35].CGColor;
@@ -262,7 +268,7 @@ static NSColor *XSCardFill(void) {
 }
 
 - (instancetype)init {
-    NSWindow *win = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 480, 560)
+    NSWindow *win = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 480, 640)
                                                 styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                                                   backing:NSBackingStoreBuffered defer:NO];
     win.title = @"xShot 设置";
@@ -352,7 +358,12 @@ static NSColor *XSCardFill(void) {
     [hintRow addSubview:hint];
     [hotkeys addRow:hintRow height:36];
 
-    NSArray *actions = @[@(XSHotKeyActionCapture), @(XSHotKeyActionPin), @(XSHotKeyActionColorPicker)];
+    NSArray *actions = @[
+        @(XSHotKeyActionPlainCapture),
+        @(XSHotKeyActionCapture),
+        @(XSHotKeyActionColorPicker),
+        @(XSHotKeyActionPin),
+    ];
     for (NSNumber *n in actions) {
         XSHotKeyAction a = n.integerValue;
         XSHotKeyRowView *row = [[XSHotKeyRowView alloc] initWithAction:a width:cardW onChange:^(XSHotKeyAction action, UInt32 keyCode, UInt32 modifiers) {
@@ -368,7 +379,7 @@ static NSColor *XSCardFill(void) {
 
     // About section
     XSSectionCard *about = [[XSSectionCard alloc] initWithTitle:@"说明" width:cardW];
-    NSTextField *note = [NSTextField wrappingLabelWithString:@"编辑器里改过的样式会自动保存，下次截图默认沿用同一套模板。截图时 Space 切窗口模式，Esc 取消。贴图读取剪贴板图片，可拖动，点 ✕ 关闭。"];
+    NSTextField *note = [NSTextField wrappingLabelWithString:@"美化截图会套背景并打开编辑器；普通截图只复制原图。截图时 Space 切窗口模式，Esc 取消。贴图读取剪贴板图片，可拖动，Esc 关闭。"];
     note.font = [NSFont systemFontOfSize:11];
     note.textColor = NSColor.secondaryLabelColor;
     note.frame = NSMakeRect(16, 0, cardW - 32, 52);

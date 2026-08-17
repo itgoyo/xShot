@@ -8,47 +8,24 @@
 @end
 
 @implementation XSPinContentView {
-    NSPoint _dragStart;
-    NSPoint _winOrigin;
+    NSPoint _grabOffset;
     BOOL _dragging;
 }
 - (BOOL)acceptsFirstResponder { return YES; }
-- (BOOL)isOpaque { return NO; }
+- (BOOL)isOpaque { return YES; }
 - (void)drawRect:(NSRect)dirty {
-    NSRect r = NSInsetRect(self.bounds, 10, 10);
-    [self.image drawInRect:r fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1];
-    NSRect close = NSMakeRect(NSMaxX(r) - 22, NSMaxY(r) - 22, 18, 18);
-    [[[NSColor blackColor] colorWithAlphaComponent:0.45] setFill];
-    [[NSBezierPath bezierPathWithOvalInRect:close] fill];
-    NSDictionary *attrs = @{
-        NSFontAttributeName: [NSFont systemFontOfSize:11 weight:NSFontWeightBold],
-        NSForegroundColorAttributeName: NSColor.whiteColor
-    };
-    [@"✕" drawAtPoint:NSMakePoint(close.origin.x + 3.5, close.origin.y + 1.5) withAttributes:attrs];
+    [self.image drawInRect:self.bounds fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1];
 }
 - (void)mouseDown:(NSEvent *)event {
-    NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
-    NSRect r = NSInsetRect(self.bounds, 10, 10);
-    NSRect close = NSMakeRect(NSMaxX(r) - 22, NSMaxY(r) - 22, 18, 18);
-    if (NSPointInRect(p, close)) {
-        if (self.onClose) self.onClose();
-        return;
-    }
+    NSPoint screen = [NSEvent mouseLocation];
+    NSRect f = self.hostWindow.frame;
+    _grabOffset = NSMakePoint(screen.x - f.origin.x, screen.y - f.origin.y);
     _dragging = YES;
-    _dragStart = event.locationInWindow;
-    _winOrigin = self.hostWindow.frame.origin;
 }
 - (void)mouseDragged:(NSEvent *)event {
     if (!_dragging) return;
-    NSPoint cur = event.locationInWindow;
-    // convert delta to screen
-    NSPoint screenStart = [self.hostWindow convertPointToScreen:_dragStart];
-    NSPoint screenCur = [self.hostWindow convertPointToScreen:cur];
-    CGFloat dx = screenCur.x - screenStart.x;
-    CGFloat dy = screenCur.y - screenStart.y;
-    NSRect f = self.hostWindow.frame;
-    f.origin = NSMakePoint(_winOrigin.x + dx, _winOrigin.y + dy);
-    [self.hostWindow setFrame:f display:YES];
+    NSPoint screen = [NSEvent mouseLocation];
+    [self.hostWindow setFrameOrigin:NSMakePoint(screen.x - _grabOffset.x, screen.y - _grabOffset.y)];
 }
 - (void)mouseUp:(NSEvent *)event { _dragging = NO; }
 - (void)keyDown:(NSEvent *)event {
@@ -65,6 +42,9 @@
 
 @implementation XSPinController {
     NSMutableArray<NSWindow *> *_pins;
+    NSRect _lastPlainScreenRect;
+    NSInteger _lastPlainPasteboardChangeCount;
+    BOOL _hasLastPlainCapture;
 }
 
 + (instancetype)shared {
@@ -113,39 +93,41 @@
     return [[NSImage alloc] initWithPasteboard:pb];
 }
 
+- (void)rememberPlainCaptureAtScreenRect:(NSRect)screenRect pasteboardChangeCount:(NSInteger)changeCount {
+    _lastPlainScreenRect = screenRect;
+    _lastPlainPasteboardChangeCount = changeCount;
+    _hasLastPlainCapture = screenRect.size.width >= 4 && screenRect.size.height >= 4;
+}
+
 - (void)pinClipboardIfImage {
+    NSPasteboard *pb = NSPasteboard.generalPasteboard;
     NSImage *img = [self clipboardImage];
     if (!img || img.size.width < 2 || img.size.height < 2) return;
-    NSScreen *s = NSScreen.mainScreen;
-    NSRect sf = s.visibleFrame;
-    NSRect dest = NSMakeRect(sf.origin.x + 40,
-                             sf.origin.y + sf.size.height - img.size.height - 80,
-                             img.size.width, img.size.height);
+    NSRect dest = NSZeroRect;
+    if (_hasLastPlainCapture && pb.changeCount == _lastPlainPasteboardChangeCount) {
+        dest = _lastPlainScreenRect;
+    } else {
+        NSScreen *s = NSScreen.mainScreen;
+        NSRect sf = s.visibleFrame;
+        dest = NSMakeRect(sf.origin.x + 40,
+                          sf.origin.y + sf.size.height - img.size.height - 80,
+                          img.size.width, img.size.height);
+    }
     [self pinImage:img atScreenRect:dest];
 }
 
 - (void)pinImage:(NSImage *)image atScreenRect:(NSRect)screenRect {
     if (!image || image.size.width < 2) return;
-    CGFloat pad = 10;
-    NSSize img = image.size;
-    NSRect frame = screenRect;
-    if (frame.size.width < 4 || frame.size.height < 4) {
+    NSRect frame;
+    if (screenRect.size.width >= 4 && screenRect.size.height >= 4) {
+        frame = screenRect;
+    } else {
+        NSSize img = image.size;
         NSScreen *s = NSScreen.mainScreen;
         NSRect sf = s.frame;
         frame = NSMakeRect(sf.origin.x + (sf.size.width - img.width) / 2.0,
                            sf.origin.y + (sf.size.height - img.height) / 2.0,
                            img.width, img.height);
-    }
-    // keep image aspect, use capture rect size if possible
-    frame.size = NSMakeSize(img.width + pad * 2, img.height + pad * 2);
-    // if original rect had position, use its origin
-    if (screenRect.size.width > 4) {
-        frame.origin = screenRect.origin;
-        // adjust if image smaller/larger than selection — keep top-left of selection
-        frame.origin.y = screenRect.origin.y + screenRect.size.height - frame.size.height;
-        if (frame.size.height > screenRect.size.height) {
-            frame.origin.y = screenRect.origin.y;
-        }
     }
 
     XSPinWindow *win = [[XSPinWindow alloc] initWithContentRect:frame
@@ -153,12 +135,13 @@
                                                         backing:NSBackingStoreBuffered
                                                           defer:NO];
     win.level = NSFloatingWindowLevel + 2;
-    win.opaque = NO;
-    win.backgroundColor = NSColor.clearColor;
+    win.opaque = YES;
+    win.backgroundColor = NSColor.blackColor;
     win.hasShadow = YES;
     win.movableByWindowBackground = NO;
-    win.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary | NSWindowCollectionBehaviorStationary;
+    win.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
     win.releasedWhenClosed = NO;
+    win.animationBehavior = NSWindowAnimationBehaviorNone;
 
     XSPinContentView *view = [[XSPinContentView alloc] initWithFrame:NSMakeRect(0, 0, frame.size.width, frame.size.height)];
     view.image = image;
@@ -175,6 +158,7 @@
     [win setFrame:frame display:YES];
     [win orderFront:nil];
     [win makeKeyAndOrderFront:nil];
+    [win makeFirstResponder:view];
     [_pins addObject:win];
     NSApp.activationPolicy = NSApplicationActivationPolicyAccessory;
 }

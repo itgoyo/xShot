@@ -1,5 +1,6 @@
 #import "XSCaptureController.h"
 #import "XSEditorWindowController.h"
+#import "XSPinController.h"
 #import <CoreGraphics/CoreGraphics.h>
 
 @interface XSOverlayView : NSView
@@ -51,10 +52,10 @@
         hole = self.selection;
     }
     if (hole.size.width > 2) {
-        NSBezierPath *inner = [NSBezierPath bezierPathWithRoundedRect:hole xRadius:6 yRadius:6];
         [self.screenImage drawInRect:hole fromRect:[self imageRectForViewRect:hole] operation:NSCompositingOperationCopy fraction:1];
         [[NSColor colorWithWhite:1 alpha:0.95] setStroke];
-        inner.lineWidth = 2;
+        NSBezierPath *inner = [NSBezierPath bezierPathWithRect:NSInsetRect(hole, 0.5, 0.5)];
+        inner.lineWidth = 1;
         [inner stroke];
 
         NSInteger w = (NSInteger)llround(hole.size.width);
@@ -193,6 +194,7 @@
 
 @implementation XSCaptureController {
     NSMutableArray<XSOverlayWindow *> *_windows;
+    BOOL _plainMode;
 }
 
 + (instancetype)shared {
@@ -203,6 +205,12 @@
 }
 
 - (void)beginCapture {
+    _plainMode = NO;
+    [self start];
+}
+
+- (void)beginPlainCapture {
+    _plainMode = YES;
     [self start];
 }
 
@@ -271,11 +279,49 @@
 }
 
 - (void)finishWithImage:(NSImage *)image screenRect:(NSRect)screenRect {
+    BOOL plain = _plainMode;
+    _plainMode = NO;
     [self dismiss];
     [NSApp unhide:nil];
-    [NSApp activateIgnoringOtherApps:YES];
     if (!image || image.size.width < 2) return;
+    if (plain) {
+        NSPasteboard *pb = NSPasteboard.generalPasteboard;
+        [pb clearContents];
+        [pb writeObjects:@[image]];
+        [[XSPinController shared] rememberPlainCaptureAtScreenRect:screenRect pasteboardChangeCount:pb.changeCount];
+        [self showCopiedHUD];
+        return;
+    }
+    [NSApp activateIgnoringOtherApps:YES];
     [[XSEditorWindowController shared] showWithImage:image];
+}
+
+- (void)showCopiedHUD {
+    NSPanel *hud = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 148, 48)
+                                              styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                                                backing:NSBackingStoreBuffered defer:NO];
+    hud.level = NSFloatingWindowLevel + 5;
+    hud.opaque = NO;
+    hud.backgroundColor = NSColor.clearColor;
+    hud.hasShadow = YES;
+    NSView *v = [[NSView alloc] initWithFrame:hud.contentView.bounds];
+    v.wantsLayer = YES;
+    v.layer.backgroundColor = [[NSColor blackColor] colorWithAlphaComponent:0.78].CGColor;
+    v.layer.cornerRadius = 12;
+    NSTextField *label = [NSTextField labelWithString:@"已复制到剪贴板"];
+    label.textColor = NSColor.whiteColor;
+    label.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+    label.alignment = NSTextAlignmentCenter;
+    label.frame = NSMakeRect(0, 14, 148, 20);
+    [v addSubview:label];
+    hud.contentView = v;
+    NSScreen *s = NSScreen.mainScreen;
+    NSRect sf = s.visibleFrame;
+    [hud setFrameOrigin:NSMakePoint(sf.origin.x + (sf.size.width - 148) / 2, sf.origin.y + 80)];
+    [hud orderFront:nil];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [hud close];
+    });
 }
 
 - (void)dismiss {

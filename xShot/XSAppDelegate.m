@@ -37,12 +37,14 @@
         self.statusItem.button.image = img;
     }
     NSMenu *menu = [NSMenu new];
-    NSString *cap = [NSString stringWithFormat:@"截图    %@", [XSHotKeyManager.shared displayForAction:XSHotKeyActionCapture]];
-    NSString *pin = [NSString stringWithFormat:@"贴图    %@", [XSHotKeyManager.shared displayForAction:XSHotKeyActionPin]];
+    NSString *plain = [NSString stringWithFormat:@"普通截图    %@", [XSHotKeyManager.shared displayForAction:XSHotKeyActionPlainCapture]];
+    NSString *cap = [NSString stringWithFormat:@"美化截图    %@", [XSHotKeyManager.shared displayForAction:XSHotKeyActionCapture]];
     NSString *pick = [NSString stringWithFormat:@"屏幕拾色    %@", [XSHotKeyManager.shared displayForAction:XSHotKeyActionColorPicker]];
+    NSString *pin = [NSString stringWithFormat:@"贴图    %@", [XSHotKeyManager.shared displayForAction:XSHotKeyActionPin]];
+    [menu addItemWithTitle:plain action:@selector(plainCapture:) keyEquivalent:@""].target = self;
     [menu addItemWithTitle:cap action:@selector(capture:) keyEquivalent:@""].target = self;
-    [menu addItemWithTitle:pin action:@selector(pin:) keyEquivalent:@""].target = self;
     [menu addItemWithTitle:pick action:@selector(colorPick:) keyEquivalent:@""].target = self;
+    [menu addItemWithTitle:pin action:@selector(pin:) keyEquivalent:@""].target = self;
     [menu addItem:NSMenuItem.separatorItem];
     [menu addItemWithTitle:@"从剪贴板打开" action:@selector(openClipboard:) keyEquivalent:@""].target = self;
     [menu addItemWithTitle:@"打开文件…" action:@selector(openFile:) keyEquivalent:@""].target = self;
@@ -56,12 +58,14 @@
 - (void)hotKeyActionTriggered:(XSHotKeyAction)action {
     switch (action) {
         case XSHotKeyActionCapture: [XSCaptureController.shared beginCapture]; break;
+        case XSHotKeyActionPlainCapture: [XSCaptureController.shared beginPlainCapture]; break;
         case XSHotKeyActionPin: [[XSPinController shared] pinClipboardIfImage]; break;
         case XSHotKeyActionColorPicker: [XSColorPickerController.shared beginPick]; break;
     }
 }
 
 - (void)capture:(id)sender { [XSCaptureController.shared beginCapture]; }
+- (void)plainCapture:(id)sender { [XSCaptureController.shared beginPlainCapture]; }
 - (void)pin:(id)sender { [[XSPinController shared] pinClipboardIfImage]; }
 - (void)colorPick:(id)sender { [XSColorPickerController.shared beginPick]; }
 

@@ -48,9 +48,10 @@ static OSStatus XSHotKeyHandler(EventHandlerCallRef next, EventRef event, void *
 - (void)loadDefaults {
     NSUserDefaults *ud = NSUserDefaults.standardUserDefaults;
     NSDictionary *defs = @{
-        @(XSHotKeyActionCapture): @{@"key": @(kVK_ANSI_X), @"mods": @(cmdKey | shiftKey)},
-        @(XSHotKeyActionPin): @{@"key": @(kVK_ANSI_P), @"mods": @(cmdKey | shiftKey)},
-        @(XSHotKeyActionColorPicker): @{@"key": @(kVK_ANSI_C), @"mods": @(cmdKey | shiftKey)},
+        @(XSHotKeyActionPlainCapture): @{@"key": @(kVK_ANSI_1), @"mods": @(cmdKey | optionKey)},
+        @(XSHotKeyActionCapture): @{@"key": @(kVK_ANSI_2), @"mods": @(cmdKey | optionKey)},
+        @(XSHotKeyActionColorPicker): @{@"key": @(kVK_ANSI_3), @"mods": @(cmdKey | optionKey)},
+        @(XSHotKeyActionPin): @{@"key": @(kVK_ANSI_4), @"mods": @(cmdKey | optionKey)},
     };
     // migrate legacy single hotkey
     if ([ud objectForKey:@"xshot.hotkey.keyCode"] && ![ud objectForKey:[self keyCodeDefaultsKey:XSHotKeyActionCapture]]) {
@@ -69,6 +70,29 @@ static OSStatus XSHotKeyHandler(EventHandlerCallRef next, EventRef event, void *
         }
         self.bindings[act] = @{@"key": @(key), @"mods": @(mods)};
     }
+
+    NSDictionary *legacyFactory = @{
+        @(XSHotKeyActionCapture): @{@"key": @(kVK_ANSI_X), @"mods": @(cmdKey | shiftKey)},
+        @(XSHotKeyActionPlainCapture): @{@"key": @(kVK_ANSI_A), @"mods": @(cmdKey | shiftKey)},
+        @(XSHotKeyActionPin): @{@"key": @(kVK_ANSI_P), @"mods": @(cmdKey | shiftKey)},
+        @(XSHotKeyActionColorPicker): @{@"key": @(kVK_ANSI_C), @"mods": @(cmdKey | shiftKey)},
+    };
+    BOOL allLegacy = YES;
+    for (NSNumber *act in defs) {
+        NSDictionary *cur = self.bindings[act];
+        NSDictionary *old = legacyFactory[act];
+        if (![cur[@"key"] isEqual:old[@"key"]] || ![cur[@"mods"] isEqual:old[@"mods"]]) {
+            allLegacy = NO;
+            break;
+        }
+    }
+    if (allLegacy) {
+        for (NSNumber *act in defs) {
+            self.bindings[act] = defs[act];
+            [ud setInteger:[defs[act][@"key"] integerValue] forKey:[self keyCodeDefaultsKey:act.integerValue]];
+            [ud setInteger:[defs[act][@"mods"] integerValue] forKey:[self modsDefaultsKey:act.integerValue]];
+        }
+    }
 }
 
 - (UInt32)keyCodeForAction:(XSHotKeyAction)action {
@@ -83,7 +107,8 @@ static OSStatus XSHotKeyHandler(EventHandlerCallRef next, EventRef event, void *
 
 + (NSString *)titleForAction:(XSHotKeyAction)action {
     switch (action) {
-        case XSHotKeyActionCapture: return @"截图";
+        case XSHotKeyActionCapture: return @"美化截图";
+        case XSHotKeyActionPlainCapture: return @"普通截图";
         case XSHotKeyActionPin: return @"贴图";
         case XSHotKeyActionColorPicker: return @"屏幕拾色";
     }
