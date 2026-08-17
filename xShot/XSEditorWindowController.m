@@ -118,7 +118,6 @@ static NSColor *XSSidebar(void) {
 }
 
 + (void)prewarm {
-    (void)[self shared];
     [XSImageRenderer warmup];
 }
 
@@ -253,12 +252,7 @@ static NSColor *XSSidebar(void) {
         [_sidebar addSubview:b];
         [_bgButtons addObject:b];
         NSString *bgId = item.identifier;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            NSImage *thumb = [XSBackgroundCatalog thumbnailForId:bgId size:NSMakeSize(72, 44)];
-            dispatch_async(dispatch_get_main_queue(), ^{
-                b.image = thumb;
-            });
-        });
+        b.image = [XSBackgroundCatalog thumbnailForId:bgId size:NSMakeSize(72, 44)];
         NSTextField *cap = [NSTextField labelWithString:item.title];
         cap.font = [NSFont systemFontOfSize:9];
         cap.alignment = NSTextAlignmentCenter;
@@ -477,7 +471,7 @@ static NSColor *XSSidebar(void) {
         NSImage *rendered = [XSImageRenderer renderSource:src preset:preset];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (token != self->_renderToken || source != self->_source) return;
-            self->_processed = src;
+            self->_processed = (src != source) ? src : nil;
             self->_emailCount = emailCount;
             self->_rendered = rendered;
             self->_canvas.rendered = rendered;
@@ -498,6 +492,13 @@ static NSColor *XSSidebar(void) {
 
 - (void)windowWillClose:(NSNotification *)notification {
     NSApp.activationPolicy = NSApplicationActivationPolicyAccessory;
+    _renderToken++;
+    _source = nil;
+    _processed = nil;
+    _rendered = nil;
+    _canvas.rendered = nil;
+    _copyWhenRendered = NO;
+    [XSBackgroundCatalog trimCache];
 }
 
 - (void)reloadPresetPopup {
@@ -672,7 +673,11 @@ static NSColor *XSSidebar(void) {
 - (void)zoomChanged:(id)sender { [self applyZoom]; }
 
 - (NSData *)pngData {
-    NSBitmapImageRep *rep = [NSBitmapImageRep imageRepWithData:_rendered.TIFFRepresentation];
+    if (!_rendered) return nil;
+    NSRect proposed = NSMakeRect(0, 0, _rendered.size.width, _rendered.size.height);
+    CGImageRef cg = [_rendered CGImageForProposedRect:&proposed context:nil hints:nil];
+    if (!cg) return nil;
+    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:cg];
     return [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
 }
 

@@ -10,6 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface XSBackgroundCatalog : NSObject
 + (NSArray<XSBackgroundItem *> *)items;
 + (void)preloadWallpaperForId:(NSString *)identifier;
++ (void)trimCache;
 + (void)drawBackground:(NSString *)identifier
                 inRect:(CGRect)rect
                  color:(nullable NSColor *)customColor

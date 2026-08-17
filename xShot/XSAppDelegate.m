@@ -4,6 +4,7 @@
 #import "XSCaptureController.h"
 #import "XSSettingsWindowController.h"
 #import "XSEditorWindowController.h"
+#import "XSImageRenderer.h"
 #import "XSColorPickerController.h"
 #import "XSPresetStore.h"
 #import "XSPinController.h"
@@ -24,8 +25,8 @@
     if (!CGPreflightScreenCaptureAccess()) {
         CGRequestScreenCaptureAccess();
     }
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [XSEditorWindowController prewarm];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        [XSImageRenderer warmup];
     });
 }
 

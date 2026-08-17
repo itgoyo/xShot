@@ -1,4 +1,5 @@
 #import "XSBackgroundCatalog.h"
+#import <ImageIO/ImageIO.h>
 
 @implementation XSBackgroundItem
 @end
@@ -9,18 +10,21 @@
     NSString *bundled = [[NSBundle mainBundle] resourcePath];
     NSString *inBundle = [bundled stringByAppendingPathComponent:@"Wallpapers"];
     if ([[NSFileManager defaultManager] fileExistsAtPath:inBundle]) return inBundle;
-    // Dev fallback: source tree next to executable / relative to CWD
     NSString *dev = [[[NSBundle mainBundle] bundlePath]
-                     stringByDeletingLastPathComponent]; // Contents
-    dev = [[dev stringByDeletingLastPathComponent] // .app
-           stringByDeletingLastPathComponent]; // dist
+                     stringByDeletingLastPathComponent];
+    dev = [[dev stringByDeletingLastPathComponent]
+           stringByDeletingLastPathComponent];
     NSString *src = [dev stringByAppendingPathComponent:@"xShot/Resources/Wallpapers"];
     if ([[NSFileManager defaultManager] fileExistsAtPath:src]) return src;
     return inBundle;
 }
 
 + (void)preloadWallpaperForId:(NSString *)identifier {
-    (void)[self wallpaperImageForId:identifier];
+    (void)[self wallpaperImageForId:identifier maxPixelSize:0];
+}
+
++ (void)trimCache {
+    [[self imageCache] removeAllObjects];
 }
 
 + (NSArray<XSBackgroundItem *> *)items {
@@ -52,7 +56,8 @@
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         cache = [NSCache new];
-        cache.countLimit = 24;
+        cache.countLimit = 2;
+        cache.totalCostLimit = 48 * 1024 * 1024;
     });
     return cache;
 }
@@ -63,42 +68,88 @@
     return [NSString stringWithFormat:@"wallpaper%@.jpg", num];
 }
 
-+ (NSImage *)wallpaperImageForId:(NSString *)identifier {
-    if (identifier.length == 0) return nil;
-    NSImage *cached = [[self imageCache] objectForKey:identifier];
-    if (cached) return cached;
-
++ (NSString *)pathForWallpaperId:(NSString *)identifier {
     NSString *file = [self fileNameForId:identifier];
     if (!file) return nil;
     NSString *path = [[self wallpapersDirectory] stringByAppendingPathComponent:file];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
-        // also try NSBundle resource lookup
-        NSString *name = [file stringByDeletingPathExtension];
-        path = [[NSBundle mainBundle] pathForResource:name ofType:@"jpg" inDirectory:@"Wallpapers"];
-    }
-    if (!path || ![[NSFileManager defaultManager] fileExistsAtPath:path]) return nil;
+    if ([[NSFileManager defaultManager] fileExistsAtPath:path]) return path;
+    NSString *name = [file stringByDeletingPathExtension];
+    return [[NSBundle mainBundle] pathForResource:name ofType:@"jpg" inDirectory:@"Wallpapers"];
+}
 
-    NSImage *img = [[NSImage alloc] initWithContentsOfFile:path];
-    if (!img) return nil;
++ (NSUInteger)costForImage:(NSImage *)image {
+    NSRect proposed = NSMakeRect(0, 0, image.size.width, image.size.height);
+    CGImageRef cg = [image CGImageForProposedRect:&proposed context:nil hints:nil];
+    if (!cg) return 1024;
+    return (NSUInteger)CGImageGetWidth(cg) * (NSUInteger)CGImageGetHeight(cg) * 4;
+}
 
-    NSSize sz = img.size;
-    CGFloat maxEdge = 2200;
-    if (MAX(sz.width, sz.height) > maxEdge) {
-        CGFloat scale = maxEdge / MAX(sz.width, sz.height);
-        NSSize target = NSMakeSize(sz.width * scale, sz.height * scale);
-        NSImage *small = [[NSImage alloc] initWithSize:target];
-        [small lockFocus];
-        [img drawInRect:NSMakeRect(0, 0, target.width, target.height)
-               fromRect:NSZeroRect
-              operation:NSCompositingOperationCopy
-               fraction:1
-         respectFlipped:YES
-                  hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
-        [small unlockFocus];
-        img = small;
-    }
-    [[self imageCache] setObject:img forKey:identifier];
++ (NSImage *)downscaledImage:(NSImage *)image maxPixelSize:(CGFloat)maxPixelSize {
+    if (!image || maxPixelSize < 1) return image;
+    NSRect proposed = NSMakeRect(0, 0, image.size.width, image.size.height);
+    CGImageRef cg = [image CGImageForProposedRect:&proposed context:nil hints:nil];
+    if (!cg) return image;
+    CGFloat w = CGImageGetWidth(cg);
+    CGFloat h = CGImageGetHeight(cg);
+    if (MAX(w, h) <= maxPixelSize) return image;
+
+    CGFloat scale = maxPixelSize / MAX(w, h);
+    NSSize target = NSMakeSize(round(w * scale), round(h * scale));
+    NSImage *small = [[NSImage alloc] initWithSize:target];
+    [small lockFocus];
+    [image drawInRect:NSMakeRect(0, 0, target.width, target.height)
+             fromRect:NSZeroRect
+            operation:NSCompositingOperationCopy
+             fraction:1
+       respectFlipped:YES
+                hints:@{NSImageHintInterpolation: @(NSImageInterpolationMedium)}];
+    [small unlockFocus];
+    return small;
+}
+
++ (NSImage *)jpegThumbnailForWallpaperId:(NSString *)identifier maxPixelSize:(CGFloat)maxPixelSize {
+    NSString *path = [self pathForWallpaperId:identifier];
+    if (!path) return nil;
+    NSURL *url = [NSURL fileURLWithPath:path];
+    CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)url, NULL);
+    if (!src) return nil;
+    NSDictionary *opts = @{
+        (id)kCGImageSourceCreateThumbnailFromImageAlways: @YES,
+        (id)kCGImageSourceThumbnailMaxPixelSize: @(maxPixelSize),
+        (id)kCGImageSourceCreateThumbnailWithTransform: @YES,
+    };
+    CGImageRef cg = CGImageSourceCreateThumbnailAtIndex(src, 0, (__bridge CFDictionaryRef)opts);
+    CFRelease(src);
+    if (!cg) return nil;
+    NSImage *img = [[NSImage alloc] initWithCGImage:cg size:NSZeroSize];
+    CGImageRelease(cg);
     return img;
+}
+
++ (NSImage *)wallpaperImageForId:(NSString *)identifier maxPixelSize:(CGFloat)maxPixelSize {
+    if (identifier.length == 0) return nil;
+    NSString *cacheKey = maxPixelSize > 0
+        ? [NSString stringWithFormat:@"%@-%0.f", identifier, maxPixelSize]
+        : identifier;
+    NSImage *cached = [[self imageCache] objectForKey:cacheKey];
+    if (cached) return cached;
+
+    NSString *path = [self pathForWallpaperId:identifier];
+    if (!path) return nil;
+
+    CGFloat target = maxPixelSize > 0 ? maxPixelSize : 1400;
+    NSImage *img = [self jpegThumbnailForWallpaperId:identifier maxPixelSize:target];
+    if (!img) {
+        img = [[NSImage alloc] initWithContentsOfFile:path];
+        img = [self downscaledImage:img maxPixelSize:target];
+    }
+    if (!img) return nil;
+    [[self imageCache] setObject:img forKey:cacheKey cost:[self costForImage:img]];
+    return img;
+}
+
++ (NSImage *)wallpaperImageForId:(NSString *)identifier {
+    return [self wallpaperImageForId:identifier maxPixelSize:1400];
 }
 
 + (void)drawImageAspectFill:(NSImage *)image inRect:(CGRect)rect {
@@ -115,7 +166,7 @@
     CGContextSaveGState(ctx);
     CGContextClipToRect(ctx, rect);
     [image drawInRect:draw fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1
-       respectFlipped:YES hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
+       respectFlipped:YES hints:@{NSImageHintInterpolation: @(NSImageInterpolationMedium)}];
     CGContextRestoreGState(ctx);
 }
 
@@ -135,7 +186,9 @@
             return;
         }
     }
-    NSImage *wall = [self wallpaperImageForId:identifier];
+    CGFloat maxEdge = MAX(rect.size.width, rect.size.height);
+    maxEdge = MIN(1400, MAX(320, maxEdge * 1.25));
+    NSImage *wall = [self wallpaperImageForId:identifier maxPixelSize:maxEdge];
     if (wall) {
         [self drawImageAspectFill:wall inRect:rect];
         return;
@@ -169,7 +222,12 @@
             NSParagraphStyleAttributeName: ps
         }];
     } else {
-        [self drawBackground:identifier inRect:NSMakeRect(0, 0, size.width, size.height) color:nil image:nil];
+        NSImage *thumb = [self jpegThumbnailForWallpaperId:identifier maxPixelSize:MAX(size.width, size.height) * 2.0];
+        if (thumb) {
+            [self drawImageAspectFill:thumb inRect:NSMakeRect(0, 0, size.width, size.height)];
+        } else {
+            [self drawBackground:identifier inRect:NSMakeRect(0, 0, size.width, size.height) color:nil image:nil];
+        }
     }
     [img unlockFocus];
     return img;

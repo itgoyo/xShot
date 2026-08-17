@@ -32,17 +32,29 @@
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-            [XSBackgroundCatalog preloadWallpaperForId:@"wp1"];
             NSImage *dot = [[NSImage alloc] initWithSize:NSMakeSize(4, 4)];
             [self blurredImage:dot radius:0];
         });
     });
 }
 
++ (NSColor *)sampleColorFromCGImage:(CGImageRef)cg x:(NSInteger)x y:(NSInteger)y {
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    unsigned char px[4] = {0};
+    CGContextRef ctx = CGBitmapContextCreate(px, 1, 1, 8, 4, cs, kCGImageAlphaPremultipliedLast);
+    if (ctx) {
+        CGContextDrawImage(ctx, CGRectMake(-x, -y, CGImageGetWidth(cg), CGImageGetHeight(cg)), cg);
+        CGContextRelease(ctx);
+    }
+    CGColorSpaceRelease(cs);
+    return [NSColor colorWithCalibratedRed:px[0] / 255.0 green:px[1] / 255.0 blue:px[2] / 255.0 alpha:1];
+}
+
 + (NSColor *)detectBackgroundColor:(NSImage *)image {
-    NSBitmapImageRep *rep = [NSBitmapImageRep imageRepWithData:image.TIFFRepresentation];
-    if (!rep) return NSColor.whiteColor;
-    NSInteger w = rep.pixelsWide, h = rep.pixelsHigh;
+    NSRect proposed = NSMakeRect(0, 0, image.size.width, image.size.height);
+    CGImageRef cg = [image CGImageForProposedRect:&proposed context:nil hints:nil];
+    if (!cg) return NSColor.whiteColor;
+    NSInteger w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
     if (w < 4 || h < 4) return NSColor.whiteColor;
     NSPoint samples[] = {
         {2, 2}, {w - 3, 2}, {2, h - 3}, {w - 3, h - 3},
@@ -51,7 +63,7 @@
     CGFloat r = 0, g = 0, b = 0;
     int n = 6;
     for (int i = 0; i < n; i++) {
-        NSColor *c = [rep colorAtX:(NSInteger)samples[i].x y:(NSInteger)samples[i].y];
+        NSColor *c = [self sampleColorFromCGImage:cg x:(NSInteger)samples[i].x y:(NSInteger)samples[i].y];
         c = [c colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
         r += c.redComponent; g += c.greenComponent; b += c.blueComponent;
     }
@@ -62,14 +74,26 @@
     if (!image || radius < 0.5) return image;
     NSRect proposed = NSMakeRect(0, 0, image.size.width, image.size.height);
     CGImageRef cg = [image CGImageForProposedRect:&proposed context:nil hints:nil];
-    if (!cg) {
-        NSBitmapImageRep *rep = [NSBitmapImageRep imageRepWithData:image.TIFFRepresentation];
-        cg = rep.CGImage;
-    }
     if (!cg) return image;
 
-    CGFloat scale = CGImageGetWidth(cg) / MAX(1.0, image.size.width);
+    CGFloat pixelW = CGImageGetWidth(cg);
+    CGFloat pixelH = CGImageGetHeight(cg);
+    CGFloat workScale = 1.0;
+    CGFloat maxEdge = 1200.0;
+    if (MAX(pixelW, pixelH) > maxEdge) {
+        workScale = maxEdge / MAX(pixelW, pixelH);
+    }
+
     CIImage *input = [[CIImage alloc] initWithCGImage:cg];
+    if (workScale < 0.999) {
+        CIFilter *scale = [CIFilter filterWithName:@"CILanczosScaleTransform"];
+        [scale setValue:input forKey:kCIInputImageKey];
+        [scale setValue:@(workScale) forKey:kCIInputScaleKey];
+        [scale setValue:@1.0 forKey:kCIInputAspectRatioKey];
+        input = scale.outputImage;
+    }
+
+    CGFloat scale = (CGImageGetWidth(cg) / MAX(1.0, image.size.width)) * workScale;
     CIFilter *clamp = [CIFilter filterWithName:@"CIAffineClamp"];
     [clamp setDefaults];
     [clamp setValue:input forKey:kCIInputImageKey];
@@ -83,7 +107,10 @@
     static CIContext *ciCtx;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        ciCtx = [CIContext contextWithOptions:@{kCIContextUseSoftwareRenderer: @NO}];
+        ciCtx = [CIContext contextWithOptions:@{
+            kCIContextUseSoftwareRenderer: @NO,
+            kCIContextCacheIntermediates: @NO,
+        }];
     });
     CGImageRef outCG = [ciCtx createCGImage:output fromRect:input.extent];
     if (!outCG) return image;
@@ -155,6 +182,7 @@
     [canvas lockFocus];
     if (bgLayer) {
         [bgLayer drawInRect:canvasRect fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1];
+        bgLayer = nil;
     }
 
     NSRect cardRect = NSMakeRect((canvasW - cardW) / 2.0, (canvasH - cardH) / 2.0, cardW, cardH);
