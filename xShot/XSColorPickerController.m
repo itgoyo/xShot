@@ -11,7 +11,28 @@
 
 @implementation XSColorOverlayView {
     NSTrackingArea *_track;
+    CGImageRef _cgImage;
 }
+
+- (void)dealloc {
+    if (_cgImage) {
+        CGImageRelease(_cgImage);
+        _cgImage = NULL;
+    }
+}
+
+- (void)setScreenImage:(NSImage *)screenImage {
+    _screenImage = screenImage;
+    if (_cgImage) {
+        CGImageRelease(_cgImage);
+        _cgImage = NULL;
+    }
+    if (!screenImage) return;
+    NSRect proposed = NSMakeRect(0, 0, screenImage.size.width, screenImage.size.height);
+    CGImageRef cg = [screenImage CGImageForProposedRect:&proposed context:nil hints:nil];
+    if (cg) _cgImage = CGImageRetain(cg);
+}
+
 - (BOOL)acceptsFirstResponder { return YES; }
 - (void)updateTrackingAreas {
     [super updateTrackingAreas];
@@ -21,24 +42,43 @@
                                             owner:self userInfo:nil];
     [self addTrackingArea:_track];
 }
+
 - (NSColor *)sampleAtViewPoint:(NSPoint)p {
-    CGFloat sx = self.screenImage.size.width / self.bounds.size.width;
-    CGFloat sy = self.screenImage.size.height / self.bounds.size.height;
-    NSInteger ix = MIN(MAX((NSInteger)(p.x * sx), 0), (NSInteger)self.screenImage.size.width - 1);
-    NSInteger iy = MIN(MAX((NSInteger)(p.y * sy), 0), (NSInteger)self.screenImage.size.height - 1);
-    // NSImage y is bottom-up in bitmap when using TIFF
-    NSBitmapImageRep *rep = [NSBitmapImageRep imageRepWithData:self.screenImage.TIFFRepresentation];
-    if (!rep) return NSColor.blackColor;
-    // bitmap y is often top-down for CGDisplayCreateImage wrapped images — try both
-    NSInteger by = iy;
-    if (rep.pixelsHigh == (NSInteger)self.screenImage.size.height) {
-        // Cocoa image coords: origin bottom-left
-        by = (NSInteger)self.screenImage.size.height - 1 - iy;
-        if (by < 0) by = 0;
-        if (by >= rep.pixelsHigh) by = rep.pixelsHigh - 1;
+    if (!_cgImage) return NSColor.blackColor;
+    CGFloat vw = MAX(1.0, self.bounds.size.width);
+    CGFloat vh = MAX(1.0, self.bounds.size.height);
+    size_t pw = CGImageGetWidth(_cgImage);
+    size_t ph = CGImageGetHeight(_cgImage);
+    if (pw == 0 || ph == 0) return NSColor.blackColor;
+
+    CGFloat px = MIN(MAX(p.x, 0), vw - 0.0001);
+    CGFloat py = MIN(MAX(p.y, 0), vh - 0.0001);
+    NSInteger ix = (NSInteger)floor(px * (CGFloat)pw / vw);
+    // 视图原点在左下，CGImage 原点在左上
+    NSInteger iy = (NSInteger)floor((vh - py) * (CGFloat)ph / vh);
+    if (iy >= (NSInteger)ph) iy = (NSInteger)ph - 1;
+    ix = MIN(MAX(ix, 0), (NSInteger)pw - 1);
+    iy = MIN(MAX(iy, 0), (NSInteger)ph - 1);
+
+    CGImageRef pixel = CGImageCreateWithImageInRect(_cgImage, CGRectMake(ix, iy, 1, 1));
+    if (!pixel) return NSColor.blackColor;
+    unsigned char rgba[4] = {0, 0, 0, 255};
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx = CGBitmapContextCreate(rgba, 1, 1, 8, 4, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    if (ctx) {
+        CGContextSetBlendMode(ctx, kCGBlendModeCopy);
+        CGContextDrawImage(ctx, CGRectMake(0, 0, 1, 1), pixel);
+        CGContextRelease(ctx);
     }
-    NSColor *c = [rep colorAtX:ix y:by];
-    return [c colorUsingColorSpace:NSColorSpace.sRGBColorSpace] ?: NSColor.blackColor;
+    CGColorSpaceRelease(cs);
+    CGImageRelease(pixel);
+
+    CGFloat a = rgba[3] / 255.0;
+    if (a <= 0.001) return NSColor.blackColor;
+    return [NSColor colorWithSRGBRed:(rgba[0] / 255.0) / a
+                               green:(rgba[1] / 255.0) / a
+                                blue:(rgba[2] / 255.0) / a
+                               alpha:1];
 }
 - (void)drawRect:(NSRect)dirty {
     [self.screenImage drawInRect:self.bounds fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1];
@@ -88,6 +128,7 @@
             (int)llround(c.greenComponent * 255),
             (int)llround(c.blueComponent * 255)];
 }
+- (void)mouseEntered:(NSEvent *)event { [self mouseMoved:event]; }
 - (void)mouseMoved:(NSEvent *)event {
     self.cursor = [self convertPoint:event.locationInWindow fromView:nil];
     self.currentColor = [self sampleAtViewPoint:self.cursor];
@@ -220,7 +261,12 @@
 }
 
 - (void)dismiss {
-    for (NSWindow *w in _windows) [w close];
+    for (NSWindow *w in _windows) {
+        if ([w.contentView isKindOfClass:XSColorOverlayView.class]) {
+            ((XSColorOverlayView *)w.contentView).screenImage = nil;
+        }
+        [w close];
+    }
     [_windows removeAllObjects];
     [[NSCursor arrowCursor] set];
 }
