@@ -8,6 +8,7 @@
 #import "XSColorPickerController.h"
 #import "XSPresetStore.h"
 #import "XSPinController.h"
+#import "XSAnnotationWindowController.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 @interface XSAppDelegate () <XSHotKeyManagerDelegate>
@@ -40,10 +41,12 @@
     NSMenu *menu = [NSMenu new];
     NSString *plain = [NSString stringWithFormat:@"普通截图    %@", [XSHotKeyManager.shared displayForAction:XSHotKeyActionPlainCapture]];
     NSString *cap = [NSString stringWithFormat:@"美化截图    %@", [XSHotKeyManager.shared displayForAction:XSHotKeyActionCapture]];
+    NSString *ann = [NSString stringWithFormat:@"标注截图    %@", [XSHotKeyManager.shared displayForAction:XSHotKeyActionAnnotate]];
     NSString *pick = [NSString stringWithFormat:@"屏幕拾色    %@", [XSHotKeyManager.shared displayForAction:XSHotKeyActionColorPicker]];
     NSString *pin = [NSString stringWithFormat:@"贴图    %@", [XSHotKeyManager.shared displayForAction:XSHotKeyActionPin]];
     [menu addItemWithTitle:plain action:@selector(plainCapture:) keyEquivalent:@""].target = self;
     [menu addItemWithTitle:cap action:@selector(capture:) keyEquivalent:@""].target = self;
+    [menu addItemWithTitle:ann action:@selector(annotateCapture:) keyEquivalent:@""].target = self;
     [menu addItemWithTitle:pick action:@selector(colorPick:) keyEquivalent:@""].target = self;
     [menu addItemWithTitle:pin action:@selector(pin:) keyEquivalent:@""].target = self;
     [menu addItem:NSMenuItem.separatorItem];
@@ -60,6 +63,7 @@
     switch (action) {
         case XSHotKeyActionCapture: [XSCaptureController.shared beginCapture]; break;
         case XSHotKeyActionPlainCapture: [XSCaptureController.shared beginPlainCapture]; break;
+        case XSHotKeyActionAnnotate: [XSCaptureController.shared beginAnnotateCapture]; break;
         case XSHotKeyActionPin: [[XSPinController shared] pinClipboardIfImage]; break;
         case XSHotKeyActionColorPicker: [XSColorPickerController.shared beginPick]; break;
     }
@@ -67,6 +71,7 @@
 
 - (void)capture:(id)sender { [XSCaptureController.shared beginCapture]; }
 - (void)plainCapture:(id)sender { [XSCaptureController.shared beginPlainCapture]; }
+- (void)annotateCapture:(id)sender { [XSCaptureController.shared beginAnnotateCapture]; }
 - (void)pin:(id)sender { [[XSPinController shared] pinClipboardIfImage]; }
 - (void)colorPick:(id)sender { [XSColorPickerController.shared beginPick]; }
 

@@ -8,6 +8,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)beginCapture;
 /// 普通截图：框选后直接复制原图到剪贴板，不打开编辑器
 - (void)beginPlainCapture;
+/// 标注截图：框选后进入标注编辑器
+- (void)beginAnnotateCapture;
 @end
 
 NS_ASSUME_NONNULL_END

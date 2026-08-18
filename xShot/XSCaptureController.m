@@ -1,5 +1,6 @@
 #import "XSCaptureController.h"
 #import "XSEditorWindowController.h"
+#import "XSAnnotationWindowController.h"
 #import "XSPinController.h"
 #import <CoreGraphics/CoreGraphics.h>
 
@@ -192,9 +193,15 @@
 
 @end
 
+typedef NS_ENUM(NSInteger, XSCaptureMode) {
+    XSCaptureModeBeautify = 0,
+    XSCaptureModeAnnotate,
+    XSCaptureModePlain,
+};
+
 @implementation XSCaptureController {
     NSMutableArray<XSOverlayWindow *> *_windows;
-    BOOL _plainMode;
+    XSCaptureMode _mode;
 }
 
 + (instancetype)shared {
@@ -205,12 +212,17 @@
 }
 
 - (void)beginCapture {
-    _plainMode = NO;
+    _mode = XSCaptureModeBeautify;
     [self start];
 }
 
 - (void)beginPlainCapture {
-    _plainMode = YES;
+    _mode = XSCaptureModePlain;
+    [self start];
+}
+
+- (void)beginAnnotateCapture {
+    _mode = XSCaptureModeAnnotate;
     [self start];
 }
 
@@ -279,12 +291,12 @@
 }
 
 - (void)finishWithImage:(NSImage *)image screenRect:(NSRect)screenRect {
-    BOOL plain = _plainMode;
-    _plainMode = NO;
+    XSCaptureMode mode = _mode;
+    _mode = XSCaptureModeBeautify;
     [self dismiss];
     [NSApp unhide:nil];
     if (!image || image.size.width < 2) return;
-    if (plain) {
+    if (mode == XSCaptureModePlain) {
         NSPasteboard *pb = NSPasteboard.generalPasteboard;
         [pb clearContents];
         [pb writeObjects:@[image]];
@@ -293,6 +305,10 @@
         return;
     }
     [NSApp activateIgnoringOtherApps:YES];
+    if (mode == XSCaptureModeAnnotate) {
+        [[XSAnnotationWindowController shared] showWithImage:image];
+        return;
+    }
     [[XSEditorWindowController shared] showWithImage:image];
 }
 

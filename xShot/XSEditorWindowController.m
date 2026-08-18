@@ -756,6 +756,7 @@ static NSColor *XSSidebar(void) {
 }
 
 - (void)keyDown:(NSEvent *)event {
+    if (event.keyCode == 53) { [self.window close]; return; }
     NSEventModifierFlags m = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
     if ((m & NSEventModifierFlagCommand) && event.keyCode == 8) { [self copyImage:nil]; return; }
     if ((m & NSEventModifierFlagCommand) && event.keyCode == 1) {

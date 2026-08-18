@@ -52,6 +52,7 @@ static OSStatus XSHotKeyHandler(EventHandlerCallRef next, EventRef event, void *
         @(XSHotKeyActionCapture): @{@"key": @(kVK_ANSI_2), @"mods": @(cmdKey | optionKey)},
         @(XSHotKeyActionColorPicker): @{@"key": @(kVK_ANSI_3), @"mods": @(cmdKey | optionKey)},
         @(XSHotKeyActionPin): @{@"key": @(kVK_ANSI_4), @"mods": @(cmdKey | optionKey)},
+        @(XSHotKeyActionAnnotate): @{@"key": @(kVK_ANSI_5), @"mods": @(cmdKey | optionKey)},
     };
     // migrate legacy single hotkey
     if ([ud objectForKey:@"xshot.hotkey.keyCode"] && ![ud objectForKey:[self keyCodeDefaultsKey:XSHotKeyActionCapture]]) {
@@ -111,6 +112,7 @@ static OSStatus XSHotKeyHandler(EventHandlerCallRef next, EventRef event, void *
         case XSHotKeyActionPlainCapture: return @"普通截图";
         case XSHotKeyActionPin: return @"贴图";
         case XSHotKeyActionColorPicker: return @"屏幕拾色";
+        case XSHotKeyActionAnnotate: return @"标注截图";
     }
     return @"";
 }

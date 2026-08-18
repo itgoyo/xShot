@@ -8,6 +8,7 @@ typedef NS_ENUM(NSInteger, XSHotKeyAction) {
     XSHotKeyActionPin = 2,
     XSHotKeyActionColorPicker = 3,
     XSHotKeyActionPlainCapture = 4,
+    XSHotKeyActionAnnotate = 5,
 };
 
 @protocol XSHotKeyManagerDelegate <NSObject>

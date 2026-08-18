@@ -229,6 +229,7 @@ static NSColor *XSCardFill(void) {
         switch (action) {
             case XSHotKeyActionCapture: subtitle = @"截图后套背景进入编辑器"; break;
             case XSHotKeyActionPlainCapture: subtitle = @"框选后直接复制原图"; break;
+            case XSHotKeyActionAnnotate: subtitle = @"截图后进入标注编辑器"; break;
             case XSHotKeyActionPin: subtitle = @"贴剪贴板中的图片"; break;
             case XSHotKeyActionColorPicker: subtitle = @"点击复制 #RRGGBB 色值"; break;
         }
@@ -361,6 +362,7 @@ static NSColor *XSCardFill(void) {
     NSArray *actions = @[
         @(XSHotKeyActionPlainCapture),
         @(XSHotKeyActionCapture),
+        @(XSHotKeyActionAnnotate),
         @(XSHotKeyActionColorPicker),
         @(XSHotKeyActionPin),
     ];
