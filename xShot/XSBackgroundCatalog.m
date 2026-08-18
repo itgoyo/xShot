@@ -20,7 +20,7 @@
 }
 
 + (void)preloadWallpaperForId:(NSString *)identifier {
-    (void)[self wallpaperImageForId:identifier maxPixelSize:0];
+    (void)[self wallpaperImageForId:identifier];
 }
 
 + (void)trimCache {
@@ -57,7 +57,7 @@
     dispatch_once(&once, ^{
         cache = [NSCache new];
         cache.countLimit = 2;
-        cache.totalCostLimit = 48 * 1024 * 1024;
+        cache.totalCostLimit = 64 * 1024 * 1024;
     });
     return cache;
 }
@@ -84,72 +84,35 @@
     return (NSUInteger)CGImageGetWidth(cg) * (NSUInteger)CGImageGetHeight(cg) * 4;
 }
 
-+ (NSImage *)downscaledImage:(NSImage *)image maxPixelSize:(CGFloat)maxPixelSize {
-    if (!image || maxPixelSize < 1) return image;
-    NSRect proposed = NSMakeRect(0, 0, image.size.width, image.size.height);
-    CGImageRef cg = [image CGImageForProposedRect:&proposed context:nil hints:nil];
-    if (!cg) return image;
-    CGFloat w = CGImageGetWidth(cg);
-    CGFloat h = CGImageGetHeight(cg);
-    if (MAX(w, h) <= maxPixelSize) return image;
-
-    CGFloat scale = maxPixelSize / MAX(w, h);
-    NSSize target = NSMakeSize(round(w * scale), round(h * scale));
-    NSImage *small = [[NSImage alloc] initWithSize:target];
-    [small lockFocus];
-    [image drawInRect:NSMakeRect(0, 0, target.width, target.height)
-             fromRect:NSZeroRect
-            operation:NSCompositingOperationCopy
-             fraction:1
-       respectFlipped:YES
-                hints:@{NSImageHintInterpolation: @(NSImageInterpolationMedium)}];
-    [small unlockFocus];
-    return small;
-}
-
-+ (NSImage *)jpegThumbnailForWallpaperId:(NSString *)identifier maxPixelSize:(CGFloat)maxPixelSize {
-    NSString *path = [self pathForWallpaperId:identifier];
-    if (!path) return nil;
-    NSURL *url = [NSURL fileURLWithPath:path];
-    CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)url, NULL);
-    if (!src) return nil;
-    NSDictionary *opts = @{
-        (id)kCGImageSourceCreateThumbnailFromImageAlways: @YES,
-        (id)kCGImageSourceThumbnailMaxPixelSize: @(maxPixelSize),
-        (id)kCGImageSourceCreateThumbnailWithTransform: @YES,
-    };
-    CGImageRef cg = CGImageSourceCreateThumbnailAtIndex(src, 0, (__bridge CFDictionaryRef)opts);
-    CFRelease(src);
-    if (!cg) return nil;
-    NSImage *img = [[NSImage alloc] initWithCGImage:cg size:NSZeroSize];
-    CGImageRelease(cg);
-    return img;
-}
-
-+ (NSImage *)wallpaperImageForId:(NSString *)identifier maxPixelSize:(CGFloat)maxPixelSize {
++ (NSImage *)wallpaperImageForId:(NSString *)identifier {
     if (identifier.length == 0) return nil;
-    NSString *cacheKey = maxPixelSize > 0
-        ? [NSString stringWithFormat:@"%@-%0.f", identifier, maxPixelSize]
-        : identifier;
-    NSImage *cached = [[self imageCache] objectForKey:cacheKey];
+    NSImage *cached = [[self imageCache] objectForKey:identifier];
     if (cached) return cached;
 
     NSString *path = [self pathForWallpaperId:identifier];
-    if (!path) return nil;
+    if (!path || ![[NSFileManager defaultManager] fileExistsAtPath:path]) return nil;
 
-    CGFloat target = maxPixelSize > 0 ? maxPixelSize : 1400;
-    NSImage *img = [self jpegThumbnailForWallpaperId:identifier maxPixelSize:target];
-    if (!img) {
-        img = [[NSImage alloc] initWithContentsOfFile:path];
-        img = [self downscaledImage:img maxPixelSize:target];
-    }
+    NSImage *img = [[NSImage alloc] initWithContentsOfFile:path];
     if (!img) return nil;
-    [[self imageCache] setObject:img forKey:cacheKey cost:[self costForImage:img]];
-    return img;
-}
 
-+ (NSImage *)wallpaperImageForId:(NSString *)identifier {
-    return [self wallpaperImageForId:identifier maxPixelSize:1400];
+    NSSize sz = img.size;
+    CGFloat maxEdge = 2200;
+    if (MAX(sz.width, sz.height) > maxEdge) {
+        CGFloat scale = maxEdge / MAX(sz.width, sz.height);
+        NSSize target = NSMakeSize(sz.width * scale, sz.height * scale);
+        NSImage *small = [[NSImage alloc] initWithSize:target];
+        [small lockFocus];
+        [img drawInRect:NSMakeRect(0, 0, target.width, target.height)
+               fromRect:NSZeroRect
+              operation:NSCompositingOperationCopy
+               fraction:1
+         respectFlipped:YES
+                  hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
+        [small unlockFocus];
+        img = small;
+    }
+    [[self imageCache] setObject:img forKey:identifier cost:[self costForImage:img]];
+    return img;
 }
 
 + (void)drawImageAspectFill:(NSImage *)image inRect:(CGRect)rect {
@@ -166,7 +129,7 @@
     CGContextSaveGState(ctx);
     CGContextClipToRect(ctx, rect);
     [image drawInRect:draw fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1
-       respectFlipped:YES hints:@{NSImageHintInterpolation: @(NSImageInterpolationMedium)}];
+       respectFlipped:YES hints:@{NSImageHintInterpolation: @(NSImageInterpolationHigh)}];
     CGContextRestoreGState(ctx);
 }
 
@@ -186,9 +149,7 @@
             return;
         }
     }
-    CGFloat maxEdge = MAX(rect.size.width, rect.size.height);
-    maxEdge = MIN(1400, MAX(320, maxEdge * 1.25));
-    NSImage *wall = [self wallpaperImageForId:identifier maxPixelSize:maxEdge];
+    NSImage *wall = [self wallpaperImageForId:identifier];
     if (wall) {
         [self drawImageAspectFill:wall inRect:rect];
         return;
@@ -197,6 +158,26 @@
     NSColor *b = [NSColor colorWithCalibratedRed:0.75 green:0.45 blue:0.90 alpha:1];
     NSGradient *g = [[NSGradient alloc] initWithStartingColor:a endingColor:b];
     [g drawInRect:rect angle:135];
+}
+
++ (NSImage *)jpegThumbnailForWallpaperId:(NSString *)identifier maxPixelSize:(CGFloat)maxPixelSize {
+    NSString *path = [self pathForWallpaperId:identifier];
+    if (!path) return nil;
+    NSURL *url = [NSURL fileURLWithPath:path];
+    CGImageSourceRef src = CGImageSourceCreateWithURL((__bridge CFURLRef)url, NULL);
+    if (!src) return nil;
+    NSDictionary *opts = @{
+        (id)kCGImageSourceCreateThumbnailFromImageAlways: @YES,
+        (id)kCGImageSourceThumbnailMaxPixelSize: @(maxPixelSize),
+        (id)kCGImageSourceCreateThumbnailWithTransform: @YES,
+        (id)kCGImageSourceShouldCache: @NO,
+    };
+    CGImageRef cg = CGImageSourceCreateThumbnailAtIndex(src, 0, (__bridge CFDictionaryRef)opts);
+    CFRelease(src);
+    if (!cg) return nil;
+    NSImage *img = [[NSImage alloc] initWithCGImage:cg size:NSZeroSize];
+    CGImageRelease(cg);
+    return img;
 }
 
 + (NSImage *)thumbnailForId:(NSString *)identifier size:(NSSize)size {

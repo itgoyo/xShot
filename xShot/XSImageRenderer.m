@@ -76,24 +76,8 @@
     CGImageRef cg = [image CGImageForProposedRect:&proposed context:nil hints:nil];
     if (!cg) return image;
 
-    CGFloat pixelW = CGImageGetWidth(cg);
-    CGFloat pixelH = CGImageGetHeight(cg);
-    CGFloat workScale = 1.0;
-    CGFloat maxEdge = 1200.0;
-    if (MAX(pixelW, pixelH) > maxEdge) {
-        workScale = maxEdge / MAX(pixelW, pixelH);
-    }
-
+    CGFloat scale = CGImageGetWidth(cg) / MAX(1.0, image.size.width);
     CIImage *input = [[CIImage alloc] initWithCGImage:cg];
-    if (workScale < 0.999) {
-        CIFilter *scale = [CIFilter filterWithName:@"CILanczosScaleTransform"];
-        [scale setValue:input forKey:kCIInputImageKey];
-        [scale setValue:@(workScale) forKey:kCIInputScaleKey];
-        [scale setValue:@1.0 forKey:kCIInputAspectRatioKey];
-        input = scale.outputImage;
-    }
-
-    CGFloat scale = (CGImageGetWidth(cg) / MAX(1.0, image.size.width)) * workScale;
     CIFilter *clamp = [CIFilter filterWithName:@"CIAffineClamp"];
     [clamp setDefaults];
     [clamp setValue:input forKey:kCIInputImageKey];

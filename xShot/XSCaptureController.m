@@ -5,7 +5,6 @@
 
 @interface XSOverlayView : NSView
 @property (nonatomic, strong) NSImage *screenImage;
-@property (nonatomic, assign) CGDirectDisplayID displayID;
 @property (nonatomic, assign) NSRect selection;
 @property (nonatomic, assign) BOOL dragging;
 @property (nonatomic, assign) BOOL windowMode;
@@ -181,22 +180,6 @@
 
 - (NSImage *)cropViewRect:(NSRect)r {
     NSRect ir = [self imageRectForViewRect:r];
-    if (self.displayID != 0) {
-        CGImageRef full = CGDisplayCreateImage(self.displayID);
-        if (full) {
-            CGFloat sx = CGImageGetWidth(full) / MAX(1.0, self.bounds.size.width);
-            CGFloat sy = CGImageGetHeight(full) / MAX(1.0, self.bounds.size.height);
-            CGRect crop = CGRectMake(round(ir.origin.x * sx), round(ir.origin.y * sy),
-                                     round(ir.size.width * sx), round(ir.size.height * sy));
-            CGImageRef part = CGImageCreateWithImageInRect(full, crop);
-            CGImageRelease(full);
-            if (part) {
-                NSImage *out = [[NSImage alloc] initWithCGImage:part size:ir.size];
-                CGImageRelease(part);
-                return out;
-            }
-        }
-    }
     NSImage *out = [[NSImage alloc] initWithSize:ir.size];
     [out lockFocus];
     [self.screenImage drawInRect:NSMakeRect(0, 0, ir.size.width, ir.size.height)
@@ -247,33 +230,12 @@
     });
 }
 
-- (CGImageRef)downscaledCGImage:(CGImageRef)cg maxPixelSize:(CGFloat)maxPixel CF_RETURNS_RETAINED {
-    size_t w = CGImageGetWidth(cg);
-    size_t h = CGImageGetHeight(cg);
-    if (MAX(w, h) <= (size_t)maxPixel) return CGImageRetain(cg);
-    CGFloat scale = maxPixel / MAX(w, h);
-    size_t tw = MAX(1, (size_t)round(w * scale));
-    size_t th = MAX(1, (size_t)round(h * scale));
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    CGContextRef ctx = CGBitmapContextCreate(NULL, tw, th, 8, tw * 4, cs, kCGImageAlphaPremultipliedLast);
-    CGColorSpaceRelease(cs);
-    if (!ctx) return CGImageRetain(cg);
-    CGContextSetInterpolationQuality(ctx, kCGInterpolationMedium);
-    CGContextDrawImage(ctx, CGRectMake(0, 0, tw, th), cg);
-    CGImageRef out = CGBitmapContextCreateImage(ctx);
-    CGContextRelease(ctx);
-    return out ?: CGImageRetain(cg);
-}
-
 - (NSImage *)imageForScreen:(NSScreen *)screen {
     NSDictionary *desc = screen.deviceDescription;
     CGDirectDisplayID did = [desc[@"NSScreenNumber"] unsignedIntValue];
     CGImageRef cg = CGDisplayCreateImage(did);
     if (!cg) return nil;
-    CGImageRef display = [self downscaledCGImage:cg maxPixelSize:1600];
-    NSSize pointSize = screen.frame.size;
-    NSImage *img = [[NSImage alloc] initWithCGImage:display size:pointSize];
-    CGImageRelease(display);
+    NSImage *img = [[NSImage alloc] initWithCGImage:cg size:screen.frame.size];
     CGImageRelease(cg);
     return img;
 }
@@ -294,7 +256,6 @@
         win.releasedWhenClosed = NO;
         XSOverlayView *view = [[XSOverlayView alloc] initWithFrame:NSMakeRect(0, 0, screen.frame.size.width, screen.frame.size.height)];
         view.screenImage = shot;
-        view.displayID = [screen.deviceDescription[@"NSScreenNumber"] unsignedIntValue];
         view.hostScreen = screen;
         __weak typeof(self) weakSelf = self;
         view.onComplete = ^(NSImage *cropped, NSRect screenRect) {
@@ -364,7 +325,10 @@
 }
 
 - (void)dismiss {
-    for (XSOverlayWindow *w in _windows) [w close];
+    for (XSOverlayWindow *w in _windows) {
+        w.overlayView.screenImage = nil;
+        [w close];
+    }
     [_windows removeAllObjects];
     [[NSCursor arrowCursor] set];
 }
