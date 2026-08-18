@@ -2,7 +2,7 @@
 
 macOS 菜单栏截图工具：框选或窗口截图后，一键套上背景、圆角、阴影，成品图自动写入系统剪贴板。
 
-![xShot 编辑器](docs/editor-preview.png)
+<img width="2240" height="1536" alt="image" src="https://github.com/user-attachments/assets/cfead68c-928e-43c3-9ff0-94239e636341" />
 
 ## 功能
 
