@@ -19,11 +19,14 @@ mkdir -p "$ICONSET"
 rm -f "$ICONSET"/*.png 2>/dev/null || true
 
 python3 - "$SRC" "$MASTER" <<'PY'
+import os
 import sys
 from collections import deque
 from PIL import Image
 
 src, out = sys.argv[1], sys.argv[2]
+icon_scale = float(os.environ.get("ICON_SCALE", "0.82"))
+
 im = Image.open(src).convert("RGBA")
 
 w, h = im.size
@@ -41,7 +44,6 @@ def lum(r, g, b):
     return (r + g + b) / 3.0
 
 def is_outside(r, g, b, a):
-    # 四角连通的暗色区域视为圆角外背景（JPEG 黑底 → 透明）
     if a == 0:
         return True
     return lum(r, g, b) < 165
@@ -69,9 +71,17 @@ while q:
             seen[idx] = 1
             q.append((nx, ny))
 
+# macOS 启动台图标需留安全边距，避免视觉上比系统图标更大
+target = max(1, int(round(1024 * icon_scale)))
+im = im.resize((target, target), Image.Resampling.LANCZOS)
+canvas = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+offset = (1024 - target) // 2
+canvas.paste(im, (offset, offset), im)
+im = canvas
+
 im.save(out, format="PNG")
 alpha = im.split()[3].getextrema()
-print(f"master {out} {im.size} alpha={alpha}")
+print(f"master {out} {im.size} scale={icon_scale} alpha={alpha}")
 PY
 
 gen() {
