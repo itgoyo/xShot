@@ -32,6 +32,10 @@ macOS 菜单栏截图工具：框选或窗口截图后，一键套上背景、�
 - macOS 13 或更高
 - 首次截图需授予「屏幕录制」权限：系统设置 → 隐私与安全性 → 屏幕录制 → xShot
 
+<img width="950" height="146" alt="image" src="https://github.com/user-attachments/assets/637f693c-cf5e-42a1-b209-e3a49b682eb5" />
+
+如果出现权限无法正常获取的问题，建议先选择xShot然后点击-，然后重新使用+xShot，开启权限按钮即可。
+
 ## 构建
 
 需要 [Xcode Command Line Tools](https://developer.apple.com/download/all/?q=command%20line%20tools)。
