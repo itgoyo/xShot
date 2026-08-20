@@ -103,7 +103,6 @@ static NSColor *XSSidebar(void) {
     NSSlider *_shadowSlider;
     NSSlider *_blurSlider;
     NSButton *_balanceCheck;
-    NSButton *_insetSwatch;
     NSMutableArray<NSButton *> *_bgButtons;
     NSMutableArray<NSButton *> *_ratioButtons;
     NSButton *_redactCheck;
@@ -219,12 +218,6 @@ static NSColor *XSSidebar(void) {
     _balanceCheck = [NSButton checkboxWithTitle:@"Balance" target:self action:@selector(styleChanged:)];
     _balanceCheck.font = [NSFont systemFontOfSize:11];
     [_sidebar addSubview:_balanceCheck];
-    _insetSwatch = [NSButton buttonWithTitle:@"" target:self action:@selector(pickInsetColor:)];
-    _insetSwatch.wantsLayer = YES;
-    _insetSwatch.layer.cornerRadius = 4;
-    _insetSwatch.layer.borderWidth = 1;
-    _insetSwatch.layer.borderColor = NSColor.separatorColor.CGColor;
-    [_sidebar addSubview:_insetSwatch];
 
     [_sidebar addSubview:[self namedLabel:@"Border Radius" tag:102]];
     _radiusSlider = [self sliderMin:0 max:80 action:@selector(styleChanged:)];
@@ -375,8 +368,7 @@ static NSColor *XSSidebar(void) {
     [self sidebarSubviewWithTag:100].frame = NSMakeRect(x, y, w, 16); y += 18;
     _padSlider.frame = NSMakeRect(x, y, w, 18); y += 28;
     [self sidebarSubviewWithTag:101].frame = NSMakeRect(x, y, 80, 16);
-    _balanceCheck.frame = NSMakeRect(x + 90, y - 2, 90, 20);
-    _insetSwatch.frame = NSMakeRect(x + w - 22, y - 2, 22, 18); y += 18;
+    _balanceCheck.frame = NSMakeRect(x + 90, y - 2, 120, 20); y += 18;
     _insetSlider.frame = NSMakeRect(x, y, w, 18); y += 28;
     [self sidebarSubviewWithTag:102].frame = NSMakeRect(x, y, w, 16); y += 18;
     _radiusSlider.frame = NSMakeRect(x, y, w, 18); y += 28;
@@ -527,8 +519,6 @@ static NSColor *XSSidebar(void) {
     _redactCheck.state = p.redactEmails ? NSControlStateValueOn : NSControlStateValueOff;
     _wmCheck.state = p.showWatermark ? NSControlStateValueOn : NSControlStateValueOff;
     _wmField.stringValue = p.watermarkText ?: @"";
-    NSColor *ic = p.insetColor ?: NSColor.whiteColor;
-    _insetSwatch.layer.backgroundColor = ic.CGColor;
     for (NSButton *b in _bgButtons) {
         BOOL on = [b.identifier isEqualToString:p.backgroundId];
         b.layer.borderWidth = on ? 2 : 0;
@@ -588,24 +578,6 @@ static NSColor *XSSidebar(void) {
 
 - (void)ratioClicked:(NSButton *)sender {
     XSPresetStore.shared.current.ratioId = sender.identifier;
-    [XSPresetStore.shared persistCurrent];
-    [self rerender];
-}
-
-- (void)pickInsetColor:(id)sender {
-    XSPreset *p = XSPresetStore.shared.current;
-    p.insetColorAuto = NO;
-    NSColorPanel *panel = NSColorPanel.sharedColorPanel;
-    panel.color = p.insetColor ?: NSColor.whiteColor;
-    panel.target = self;
-    panel.action = @selector(insetColorPicked:);
-    [panel orderFront:nil];
-}
-
-- (void)insetColorPicked:(NSColorPanel *)panel {
-    XSPresetStore.shared.current.insetColor = panel.color;
-    XSPresetStore.shared.current.insetColorAuto = NO;
-    _insetSwatch.layer.backgroundColor = panel.color.CGColor;
     [XSPresetStore.shared persistCurrent];
     [self rerender];
 }

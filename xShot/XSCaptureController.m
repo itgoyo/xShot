@@ -11,6 +11,7 @@
 @property (nonatomic, assign) BOOL windowMode;
 @property (nonatomic, assign) NSRect highlightedWindow;
 @property (nonatomic, weak) NSScreen *hostScreen;
+@property (nonatomic, assign) BOOL confirmToCapture;
 @property (nonatomic, copy) void (^onComplete)(NSImage * _Nullable cropped, NSRect screenRect);
 @property (nonatomic, copy) void (^onCancel)(void);
 @end
@@ -24,9 +25,21 @@
 - (BOOL)canBecomeMainWindow { return YES; }
 @end
 
+typedef NS_ENUM(NSInteger, XSSelHandle) {
+    XSSelHandleNone = 0,
+    XSSelHandleMove,
+    XSSelHandleTL, XSSelHandleT, XSSelHandleTR,
+    XSSelHandleL,                 XSSelHandleR,
+    XSSelHandleBL, XSSelHandleB, XSSelHandleBR,
+};
+
 @implementation XSOverlayView {
     NSPoint _start;
     NSTrackingArea *_track;
+    BOOL _adjusting;
+    XSSelHandle _handle;
+    NSRect _selAtDrag;
+    NSButton *_confirmBtn;
 }
 
 - (BOOL)acceptsFirstResponder { return YES; }
@@ -73,6 +86,18 @@
         [[[NSColor blackColor] colorWithAlphaComponent:0.72] setFill];
         [bp fill];
         [label drawAtPoint:NSMakePoint(badge.origin.x + 6, badge.origin.y + 4) withAttributes:attrs];
+
+        if (_adjusting) {
+            [[NSColor colorWithWhite:1 alpha:1] setFill];
+            [[[NSColor blackColor] colorWithAlphaComponent:0.35] setStroke];
+            for (NSValue *hv in [self handleRects]) {
+                NSRect hr = hv.rectValue;
+                NSBezierPath *hp = [NSBezierPath bezierPathWithRect:NSInsetRect(hr, 1, 1)];
+                hp.lineWidth = 1;
+                [hp fill];
+                [hp stroke];
+            }
+        }
     }
 }
 
@@ -87,13 +112,164 @@
     return NSMakeRect(sf.origin.x + r.origin.x, sf.origin.y + r.origin.y, r.size.width, r.size.height);
 }
 
+- (NSArray<NSValue *> *)handleRects {
+    NSRect s = self.selection;
+    CGFloat z = 8;
+    CGFloat mx = NSMidX(s), my = NSMidY(s);
+    return @[
+        [NSValue valueWithRect:NSMakeRect(NSMinX(s) - z/2, NSMaxY(s) - z/2, z, z)],
+        [NSValue valueWithRect:NSMakeRect(mx - z/2, NSMaxY(s) - z/2, z, z)],
+        [NSValue valueWithRect:NSMakeRect(NSMaxX(s) - z/2, NSMaxY(s) - z/2, z, z)],
+        [NSValue valueWithRect:NSMakeRect(NSMinX(s) - z/2, my - z/2, z, z)],
+        [NSValue valueWithRect:NSMakeRect(NSMaxX(s) - z/2, my - z/2, z, z)],
+        [NSValue valueWithRect:NSMakeRect(NSMinX(s) - z/2, NSMinY(s) - z/2, z, z)],
+        [NSValue valueWithRect:NSMakeRect(mx - z/2, NSMinY(s) - z/2, z, z)],
+        [NSValue valueWithRect:NSMakeRect(NSMaxX(s) - z/2, NSMinY(s) - z/2, z, z)],
+    ];
+}
+
+- (XSSelHandle)handleAtPoint:(NSPoint)p {
+    if (!_adjusting || self.selection.size.width < 4) return XSSelHandleNone;
+    NSRect s = self.selection;
+    CGFloat hit = 10;
+    NSRect tl = NSMakeRect(NSMinX(s) - hit, NSMaxY(s) - hit, hit * 2, hit * 2);
+    NSRect tr = NSMakeRect(NSMaxX(s) - hit, NSMaxY(s) - hit, hit * 2, hit * 2);
+    NSRect bl = NSMakeRect(NSMinX(s) - hit, NSMinY(s) - hit, hit * 2, hit * 2);
+    NSRect br = NSMakeRect(NSMaxX(s) - hit, NSMinY(s) - hit, hit * 2, hit * 2);
+    NSRect t  = NSMakeRect(NSMidX(s) - hit, NSMaxY(s) - hit, hit * 2, hit * 2);
+    NSRect b  = NSMakeRect(NSMidX(s) - hit, NSMinY(s) - hit, hit * 2, hit * 2);
+    NSRect l  = NSMakeRect(NSMinX(s) - hit, NSMidY(s) - hit, hit * 2, hit * 2);
+    NSRect r  = NSMakeRect(NSMaxX(s) - hit, NSMidY(s) - hit, hit * 2, hit * 2);
+    if (NSPointInRect(p, tl)) return XSSelHandleTL;
+    if (NSPointInRect(p, tr)) return XSSelHandleTR;
+    if (NSPointInRect(p, bl)) return XSSelHandleBL;
+    if (NSPointInRect(p, br)) return XSSelHandleBR;
+    if (NSPointInRect(p, t))  return XSSelHandleT;
+    if (NSPointInRect(p, b))  return XSSelHandleB;
+    if (NSPointInRect(p, l))  return XSSelHandleL;
+    if (NSPointInRect(p, r))  return XSSelHandleR;
+    if (NSPointInRect(p, s))  return XSSelHandleMove;
+    return XSSelHandleNone;
+}
+
+- (void)applyCursorForHandle:(XSSelHandle)h {
+    switch (h) {
+        case XSSelHandleTL: case XSSelHandleBR: [[NSCursor resizeUpDownCursor] set]; break;
+        case XSSelHandleTR: case XSSelHandleBL: [[NSCursor resizeUpDownCursor] set]; break;
+        case XSSelHandleT:  case XSSelHandleB:  [[NSCursor resizeUpDownCursor] set]; break;
+        case XSSelHandleL:  case XSSelHandleR:  [[NSCursor resizeLeftRightCursor] set]; break;
+        case XSSelHandleMove: [[NSCursor openHandCursor] set]; break;
+        default: [[NSCursor crosshairCursor] set]; break;
+    }
+}
+
+- (NSRect)clampedSelection:(NSRect)s {
+    NSRect b = self.bounds;
+    if (s.size.width < 8) s.size.width = 8;
+    if (s.size.height < 8) s.size.height = 8;
+    if (s.origin.x < 0) s.origin.x = 0;
+    if (s.origin.y < 0) s.origin.y = 0;
+    if (NSMaxX(s) > NSMaxX(b)) s.origin.x = NSMaxX(b) - s.size.width;
+    if (NSMaxY(s) > NSMaxY(b)) s.origin.y = NSMaxY(b) - s.size.height;
+    return NSIntegralRect(s);
+}
+
+- (void)resizeSelectionToPoint:(NSPoint)p {
+    NSRect s = _selAtDrag;
+    CGFloat minX = NSMinX(s), maxX = NSMaxX(s), minY = NSMinY(s), maxY = NSMaxY(s);
+    switch (_handle) {
+        case XSSelHandleTL: minX = p.x; maxY = p.y; break;
+        case XSSelHandleTR: maxX = p.x; maxY = p.y; break;
+        case XSSelHandleBL: minX = p.x; minY = p.y; break;
+        case XSSelHandleBR: maxX = p.x; minY = p.y; break;
+        case XSSelHandleT:  maxY = p.y; break;
+        case XSSelHandleB:  minY = p.y; break;
+        case XSSelHandleL:  minX = p.x; break;
+        case XSSelHandleR:  maxX = p.x; break;
+        default: return;
+    }
+    self.selection = [self clampedSelection:NSMakeRect(MIN(minX, maxX), MIN(minY, maxY),
+                                                       fabs(maxX - minX), fabs(maxY - minY))];
+}
+
+- (void)ensureConfirmButton {
+    if (_confirmBtn) return;
+    _confirmBtn = [NSButton buttonWithTitle:@"" target:self action:@selector(confirmSelection)];
+    NSImage *img = [NSImage imageWithSize:NSMakeSize(32, 32) flipped:NO drawingHandler:^BOOL(NSRect r) {
+        NSBezierPath *bg = [NSBezierPath bezierPathWithOvalInRect:NSInsetRect(r, 2, 2)];
+        [[NSColor colorWithCalibratedRed:0.22 green:0.78 blue:0.40 alpha:1] setFill];
+        [bg fill];
+        NSBezierPath *ck = [NSBezierPath bezierPath];
+        ck.lineWidth = 2.6;
+        ck.lineCapStyle = NSLineCapStyleRound;
+        ck.lineJoinStyle = NSLineJoinStyleRound;
+        [ck moveToPoint:NSMakePoint(9, 16)];
+        [ck lineToPoint:NSMakePoint(14, 11)];
+        [ck lineToPoint:NSMakePoint(23, 21)];
+        [[NSColor whiteColor] setStroke];
+        [ck stroke];
+        return YES;
+    }];
+    _confirmBtn.image = img;
+    _confirmBtn.imagePosition = NSImageOnly;
+    _confirmBtn.bordered = NO;
+    _confirmBtn.hidden = YES;
+    [self addSubview:_confirmBtn];
+}
+
+- (void)layoutConfirmButton {
+    if (!_confirmBtn || _confirmBtn.hidden) return;
+    NSRect s = self.selection;
+    CGFloat bw = 36, bh = 36;
+    CGFloat gap = 8;
+    // 右下角：优先贴在选区右下外侧，空间不足时改到选区内部右下
+    CGFloat x = round(NSMaxX(s) - bw + 6);
+    CGFloat y = round(NSMinY(s) - bh - gap);
+    if (y < gap) {
+        y = round(NSMinY(s) + gap);
+        x = round(NSMaxX(s) - bw - gap);
+    }
+    if (x + bw > NSMaxX(self.bounds) - gap) x = NSMaxX(self.bounds) - bw - gap;
+    if (x < gap) x = gap;
+    if (y + bh > NSMaxY(self.bounds) - gap) y = NSMaxY(self.bounds) - bh - gap;
+    if (y < gap) y = gap;
+    _confirmBtn.frame = NSMakeRect(x, y, bw, bh);
+}
+
+- (void)enterAdjusting {
+    _adjusting = YES;
+    [self ensureConfirmButton];
+    _confirmBtn.hidden = NO;
+    [self layoutConfirmButton];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)exitAdjusting {
+    _adjusting = NO;
+    _handle = XSSelHandleNone;
+    _confirmBtn.hidden = YES;
+}
+
 - (void)mouseDown:(NSEvent *)event {
     if (self.windowMode) {
         [self confirmWindow];
         return;
     }
+    NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
+    if (_adjusting) {
+        XSSelHandle h = [self handleAtPoint:p];
+        if (h != XSSelHandleNone) {
+            _handle = h;
+            _selAtDrag = self.selection;
+            _start = p;
+            self.dragging = YES;
+            return;
+        }
+        [self exitAdjusting];
+    }
     self.dragging = YES;
-    _start = [self convertPoint:event.locationInWindow fromView:nil];
+    _handle = XSSelHandleNone;
+    _start = p;
     self.selection = NSMakeRect(_start.x, _start.y, 0, 0);
     [self setNeedsDisplay:YES];
 }
@@ -101,6 +277,21 @@
 - (void)mouseDragged:(NSEvent *)event {
     if (!self.dragging) return;
     NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
+    if (_handle == XSSelHandleMove) {
+        NSRect s = _selAtDrag;
+        s.origin.x += p.x - _start.x;
+        s.origin.y += p.y - _start.y;
+        self.selection = [self clampedSelection:s];
+        [self layoutConfirmButton];
+        [self setNeedsDisplay:YES];
+        return;
+    }
+    if (_handle >= XSSelHandleTL) {
+        [self resizeSelectionToPoint:p];
+        [self layoutConfirmButton];
+        [self setNeedsDisplay:YES];
+        return;
+    }
     self.selection = NSIntegralRect(NSMakeRect(MIN(_start.x, p.x), MIN(_start.y, p.y),
                                                fabs(p.x - _start.x), fabs(p.y - _start.y)));
     [self setNeedsDisplay:YES];
@@ -109,19 +300,28 @@
 - (void)mouseUp:(NSEvent *)event {
     if (!self.dragging) return;
     self.dragging = NO;
+    BOOL wasResizeOrMove = (_handle != XSSelHandleNone);
+    _handle = XSSelHandleNone;
     if (self.selection.size.width < 4 || self.selection.size.height < 4) {
         self.selection = NSZeroRect;
+        [self exitAdjusting];
         [self setNeedsDisplay:YES];
         return;
     }
-    [self confirmSelection];
+    if (self.confirmToCapture) {
+        [self enterAdjusting];
+        return;
+    }
+    if (!wasResizeOrMove) [self confirmSelection];
 }
 
 - (void)mouseMoved:(NSEvent *)event {
+    NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
     if (self.windowMode) {
-        NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
         [self highlightWindowAtPoint:p];
+        return;
     }
+    if (_adjusting) [self applyCursorForHandle:[self handleAtPoint:p]];
 }
 
 - (void)keyDown:(NSEvent *)event {
@@ -132,6 +332,7 @@
     if (event.keyCode == 49) {
         self.windowMode = !self.windowMode;
         self.selection = NSZeroRect;
+        [self exitAdjusting];
         [self setNeedsDisplay:YES];
         return;
     }
@@ -269,6 +470,7 @@ typedef NS_ENUM(NSInteger, XSCaptureMode) {
         XSOverlayView *view = [[XSOverlayView alloc] initWithFrame:NSMakeRect(0, 0, screen.frame.size.width, screen.frame.size.height)];
         view.screenImage = shot;
         view.hostScreen = screen;
+        view.confirmToCapture = (_mode == XSCaptureModePlain);
         __weak typeof(self) weakSelf = self;
         view.onComplete = ^(NSImage *cropped, NSRect screenRect) {
             [weakSelf finishWithImage:cropped screenRect:screenRect];

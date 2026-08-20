@@ -6,7 +6,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (instancetype)shared;
 /// 美化截图：进入编辑器并套背景模板
 - (void)beginCapture;
-/// 普通截图：框选后直接复制原图到剪贴板，不打开编辑器
+/// 普通截图：框选后可调整选区，点打勾才复制原图
 - (void)beginPlainCapture;
 /// 标注截图：框选后进入标注编辑器
 - (void)beginAnnotateCapture;
