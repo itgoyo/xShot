@@ -7,14 +7,8 @@
 #import "XSSettingsWindowController.h"
 #import "XSHotKeyManager.h"
 #import "XSPinController.h"
+#import "XSTheme.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
-
-static NSColor *XSCream(void) {
-    return [NSColor colorWithCalibratedRed:0.965 green:0.957 blue:0.941 alpha:1];
-}
-static NSColor *XSSidebar(void) {
-    return [NSColor colorWithCalibratedRed:0.925 green:0.918 blue:0.902 alpha:1];
-}
 
 @interface XSCanvasView : NSView <NSDraggingSource>
 @property (nonatomic, strong) NSImage *rendered;
@@ -33,7 +27,7 @@ static NSColor *XSSidebar(void) {
 }
 - (BOOL)isOpaque { return YES; }
 - (void)drawRect:(NSRect)dirty {
-    [XSCream() setFill];
+    [XSThemeCanvasColor() setFill];
     NSRectFill(self.bounds);
     if (!self.rendered) return;
     NSSize sz = self.rendered.size;
@@ -44,9 +38,9 @@ static NSColor *XSSidebar(void) {
                           draw.width, draw.height);
     BOOL none = [XSPresetStore.shared.current.backgroundId isEqualToString:@"none"];
     if (none) {
-        [[NSColor colorWithWhite:0.92 alpha:1] setFill];
+        [XSThemeCheckerColor(NO) setFill];
         NSRectFill(r);
-        [[NSColor colorWithWhite:0.8 alpha:1] setFill];
+        [XSThemeCheckerColor(YES) setFill];
         CGFloat cell = 10;
         for (int y = 0; y < draw.height / cell + 1; y++)
             for (int x = 0; x < draw.width / cell + 1; x++)
@@ -54,6 +48,10 @@ static NSColor *XSSidebar(void) {
                     NSRectFill(NSMakeRect(r.origin.x + x * cell, r.origin.y + y * cell, cell, cell));
     }
     [self.rendered drawInRect:r fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1];
+}
+- (void)viewDidChangeEffectiveAppearance {
+    [super viewDidChangeEffectiveAppearance];
+    [self setNeedsDisplay:YES];
 }
 - (NSRect)imageRect {
     NSSize sz = self.rendered.size;
@@ -80,9 +78,19 @@ static NSColor *XSSidebar(void) {
 @end
 
 @interface XSFlippedView : NSView
+@property (nonatomic, strong) NSColor *fillColor;
 @end
 @implementation XSFlippedView
 - (BOOL)isFlipped { return YES; }
+- (void)drawRect:(NSRect)dirtyRect {
+    if (!self.fillColor) return;
+    [self.fillColor setFill];
+    NSRectFill(self.bounds);
+}
+- (void)viewDidChangeEffectiveAppearance {
+    [super viewDidChangeEffectiveAppearance];
+    [self setNeedsDisplay:YES];
+}
 @end
 
 @interface XSEditorWindowController () <NSWindowDelegate>
@@ -94,7 +102,7 @@ static NSColor *XSSidebar(void) {
     NSImage *_rendered;
     XSCanvasView *_canvas;
     NSScrollView *_sidebarScroll;
-    NSView *_sidebar;
+    XSFlippedView *_sidebar;
     NSView *_bottomBar;
     NSPopUpButton *_presetPopup;
     NSSlider *_padSlider;
@@ -134,7 +142,7 @@ static NSColor *XSSidebar(void) {
     win.title = @"";
     win.minSize = NSMakeSize(860, 560);
     win.releasedWhenClosed = NO;
-    win.backgroundColor = XSCream();
+    win.backgroundColor = XSThemeResolvedColor(XSThemeCanvasColor(), win.effectiveAppearance);
     win.titlebarAppearsTransparent = YES;
     self = [super initWithWindow:win];
     if (self) {
@@ -160,6 +168,10 @@ static NSColor *XSSidebar(void) {
 
 - (void)buildChrome {
     NSView *root = self.window.contentView;
+    XSThemeBackgroundView *background = [[XSThemeBackgroundView alloc] initWithFrame:root.bounds];
+    background.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [root addSubview:background];
+
     _canvas = [[XSCanvasView alloc] initWithFrame:NSZeroRect];
     __weak typeof(self) weakSelf = self;
     _canvas.onDoubleClick = ^{ [weakSelf copyAndClose]; };
@@ -167,13 +179,12 @@ static NSColor *XSSidebar(void) {
 
     _sidebarScroll = [[NSScrollView alloc] initWithFrame:NSZeroRect];
     _sidebarScroll.drawsBackground = YES;
-    _sidebarScroll.backgroundColor = XSSidebar();
+    _sidebarScroll.backgroundColor = XSThemeSidebarColor();
     _sidebarScroll.hasVerticalScroller = YES;
     _sidebarScroll.borderType = NSNoBorder;
     _sidebarScroll.autohidesScrollers = YES;
     _sidebar = [[XSFlippedView alloc] initWithFrame:NSMakeRect(0, 0, 300, 820)];
-    _sidebar.wantsLayer = YES;
-    _sidebar.layer.backgroundColor = XSSidebar().CGColor;
+    _sidebar.fillColor = XSThemeSidebarColor();
     _sidebarScroll.documentView = _sidebar;
     [root addSubview:_sidebarScroll];
 
@@ -345,7 +356,6 @@ static NSColor *XSSidebar(void) {
     CGFloat side = 320, bar = 52;
     _sidebarScroll.frame = NSMakeRect(w - side, 0, side, h);
     _sidebar.frame = NSMakeRect(0, 0, side, 1240);
-    _sidebar.layer.backgroundColor = XSSidebar().CGColor;
     _bottomBar.frame = NSMakeRect(0, 0, w - side, bar);
     _canvas.frame = NSMakeRect(0, bar, w - side, h - bar);
     [self layoutSidebar];
