@@ -1,22 +1,34 @@
 #import "XSSettingsWindowController.h"
 #import "XSHotKeyManager.h"
 #import "XSLaunchAtLoginManager.h"
+#import "XSTheme.h"
 #import <Carbon/Carbon.h>
-
-static NSColor *XSSettingsBg(void) {
-    return [NSColor colorWithCalibratedRed:0.965 green:0.957 blue:0.941 alpha:1];
-}
-static NSColor *XSCardFill(void) {
-    if (@available(macOS 10.14, *)) {
-        return [NSColor colorNamed:@"controlBackgroundColor"] ?: NSColor.controlBackgroundColor;
-    }
-    return NSColor.controlBackgroundColor;
-}
 
 @interface XSFlippedSettingsView : NSView
 @end
 @implementation XSFlippedSettingsView
 - (BOOL)isFlipped { return YES; }
+@end
+
+/// 设置页图标底座：颜色随外观走，深色模式下压成同色相的深色块。
+@interface XSTileView : NSView
+@property (nonatomic, strong) NSColor *baseColor;
+@end
+@implementation XSTileView
+- (void)setBaseColor:(NSColor *)baseColor {
+    _baseColor = baseColor;
+    [self setNeedsDisplay:YES];
+}
+- (void)drawRect:(NSRect)dirtyRect {
+    if (!self.baseColor) return;
+    NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:self.bounds xRadius:10 yRadius:10];
+    [XSThemeTileColor(self.baseColor) setFill];
+    [path fill];
+}
+- (void)viewDidChangeEffectiveAppearance {
+    [super viewDidChangeEffectiveAppearance];
+    [self setNeedsDisplay:YES];
+}
 @end
 
 @interface XSSectionCard : NSView
@@ -32,12 +44,6 @@ static NSColor *XSCardFill(void) {
 - (instancetype)initWithTitle:(NSString *)title width:(CGFloat)width {
     self = [super initWithFrame:NSMakeRect(0, 0, width, 10)];
     if (self) {
-        self.wantsLayer = YES;
-        self.layer.cornerRadius = 12;
-        self.layer.borderWidth = 1;
-        self.layer.borderColor = [NSColor.separatorColor colorWithAlphaComponent:0.45].CGColor;
-        self.layer.backgroundColor = XSCardFill().CGColor;
-
         _titleLabel = [NSTextField labelWithString:title];
         _titleLabel.font = [NSFont systemFontOfSize:12 weight:NSFontWeightSemibold];
         _titleLabel.textColor = NSColor.secondaryLabelColor;
@@ -49,6 +55,19 @@ static NSColor *XSCardFill(void) {
         [self addSubview:_content];
     }
     return self;
+}
+- (void)drawRect:(NSRect)dirtyRect {
+    NSRect r = NSInsetRect(self.bounds, 0.5, 0.5);
+    NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:r xRadius:12 yRadius:12];
+    [XSThemeCardColor() setFill];
+    [path fill];
+    [[NSColor.separatorColor colorWithAlphaComponent:0.45] setStroke];
+    path.lineWidth = 1;
+    [path stroke];
+}
+- (void)viewDidChangeEffectiveAppearance {
+    [super viewDidChangeEffectiveAppearance];
+    [self setNeedsDisplay:YES];
 }
 - (void)addRow:(NSView *)row height:(CGFloat)height {
     row.frame = NSMakeRect(0, _contentY, _content.bounds.size.width, height);
@@ -68,6 +87,7 @@ static NSColor *XSCardFill(void) {
 
 @implementation XSHotKeyField {
     NSTextField *_label;
+    BOOL _hovering;
 }
 - (instancetype)initWithFrame:(NSRect)frame action:(XSHotKeyAction)action {
     self = [super initWithFrame:frame];
@@ -76,8 +96,7 @@ static NSColor *XSCardFill(void) {
         self.wantsLayer = YES;
         self.layer.cornerRadius = 8;
         self.layer.borderWidth = 1;
-        self.layer.borderColor = [NSColor.separatorColor colorWithAlphaComponent:0.6].CGColor;
-        self.layer.backgroundColor = [[NSColor controlBackgroundColor] colorWithAlphaComponent:0.65].CGColor;
+        [self applyChrome];
 
         _label = [[NSTextField alloc] initWithFrame:self.bounds];
         _label.editable = NO;
@@ -116,20 +135,34 @@ static NSColor *XSCardFill(void) {
                                                        options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
                                                          owner:self userInfo:nil]];
 }
+- (void)applyChrome {
+    NSAppearance *appearance = self.effectiveAppearance;
+    NSColor *fill = self.recording || _hovering ? NSColor.controlAccentColor
+                                                : NSColor.controlBackgroundColor;
+    CGFloat fillAlpha = self.recording ? 0.12 : (_hovering ? 0.08 : 0.65);
+    self.layer.backgroundColor = XSThemeResolvedAlphaColor(fill, fillAlpha, appearance).CGColor;
+    NSColor *border = self.recording ? NSColor.controlAccentColor : NSColor.separatorColor;
+    self.layer.borderColor = XSThemeResolvedAlphaColor(border, self.recording ? 1.0 : 0.6, appearance).CGColor;
+}
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    [self applyChrome];
+}
+- (void)viewDidChangeEffectiveAppearance {
+    [super viewDidChangeEffectiveAppearance];
+    [self applyChrome];
+}
 - (void)mouseEntered:(NSEvent *)event {
-    if (!self.recording) {
-        self.layer.backgroundColor = [[NSColor controlAccentColor] colorWithAlphaComponent:0.08].CGColor;
-    }
+    _hovering = YES;
+    if (!self.recording) [self applyChrome];
 }
 - (void)mouseExited:(NSEvent *)event {
-    if (!self.recording) {
-        self.layer.backgroundColor = [[NSColor controlBackgroundColor] colorWithAlphaComponent:0.65].CGColor;
-    }
+    _hovering = NO;
+    if (!self.recording) [self applyChrome];
 }
 - (void)mouseDown:(NSEvent *)event {
     self.recording = YES;
-    self.layer.borderColor = NSColor.controlAccentColor.CGColor;
-    self.layer.backgroundColor = [[NSColor controlAccentColor] colorWithAlphaComponent:0.12].CGColor;
+    [self applyChrome];
     _label.stringValue = @"按下快捷键…";
     _label.textColor = NSColor.controlAccentColor;
     [self layoutLabel];
@@ -139,8 +172,7 @@ static NSColor *XSCardFill(void) {
     if (!self.recording) return;
     if (event.keyCode == 53) {
         self.recording = NO;
-        self.layer.borderColor = [NSColor.separatorColor colorWithAlphaComponent:0.6].CGColor;
-        self.layer.backgroundColor = [[NSColor controlBackgroundColor] colorWithAlphaComponent:0.65].CGColor;
+        [self applyChrome];
         _label.textColor = NSColor.labelColor;
         [self refresh];
         return;
@@ -152,8 +184,7 @@ static NSColor *XSCardFill(void) {
     if (event.modifierFlags & NSEventModifierFlagControl) mods |= controlKey;
     if (mods == 0) return;
     self.recording = NO;
-    self.layer.borderColor = [NSColor.separatorColor colorWithAlphaComponent:0.6].CGColor;
-    self.layer.backgroundColor = [[NSColor controlBackgroundColor] colorWithAlphaComponent:0.65].CGColor;
+    [self applyChrome];
     _label.textColor = NSColor.labelColor;
     if (self.onChange) self.onChange(self.action, (UInt32)event.keyCode, mods);
     _label.stringValue = [XSHotKeyManager displayForKeyCode:(UInt32)event.keyCode modifiers:mods];
@@ -175,15 +206,13 @@ static NSColor *XSCardFill(void) {
 - (instancetype)initWithAction:(XSHotKeyAction)action width:(CGFloat)width onChange:(void (^)(XSHotKeyAction, UInt32, UInt32))onChange {
     self = [super initWithFrame:NSMakeRect(0, 0, width, 64)];
     if (self) {
-        NSView *iconWrap = [[NSView alloc] initWithFrame:NSMakeRect(16, 14, 36, 36)];
-        iconWrap.wantsLayer = YES;
-        iconWrap.layer.cornerRadius = 10;
+        XSTileView *iconWrap = [[XSTileView alloc] initWithFrame:NSMakeRect(16, 14, 36, 36)];
         if (action == XSHotKeyActionColorPicker) {
-            iconWrap.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.95 green:0.93 blue:1.0 alpha:1].CGColor;
+            iconWrap.baseColor = [NSColor colorWithCalibratedRed:0.95 green:0.93 blue:1.0 alpha:1];
             NSImageView *iv = [[NSImageView alloc] initWithFrame:NSMakeRect(6, 6, 24, 24)];
             NSImage *img = [NSImage imageWithSystemSymbolName:@"eyedropper.halffull" accessibilityDescription:nil];
             iv.image = img;
-            iv.contentTintColor = [NSColor colorWithCalibratedRed:0.45 green:0.35 blue:0.95 alpha:1];
+            iv.contentTintColor = XSThemeTintColor([NSColor colorWithCalibratedRed:0.45 green:0.35 blue:0.95 alpha:1]);
             [iconWrap addSubview:iv];
             NSArray *colors = @[
                 [NSColor colorWithCalibratedRed:0.95 green:0.35 blue:0.35 alpha:1],
@@ -200,19 +229,19 @@ static NSColor *XSCardFill(void) {
                 [iconWrap addSubview:dot];
             }
         } else if (action == XSHotKeyActionPin) {
-            iconWrap.layer.backgroundColor = [NSColor colorWithCalibratedRed:1.0 green:0.96 blue:0.88 alpha:1].CGColor;
+            iconWrap.baseColor = [NSColor colorWithCalibratedRed:1.0 green:0.96 blue:0.88 alpha:1];
             NSImageView *iv = [[NSImageView alloc] initWithFrame:NSMakeRect(6, 6, 24, 24)];
             iv.image = [NSImage imageWithSystemSymbolName:@"pin.fill" accessibilityDescription:nil];
-            iv.contentTintColor = [NSColor colorWithCalibratedRed:0.85 green:0.55 blue:0.15 alpha:1];
+            iv.contentTintColor = XSThemeTintColor([NSColor colorWithCalibratedRed:0.85 green:0.55 blue:0.15 alpha:1]);
             [iconWrap addSubview:iv];
         } else if (action == XSHotKeyActionPlainCapture) {
-            iconWrap.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.92 green:0.95 blue:0.92 alpha:1].CGColor;
+            iconWrap.baseColor = [NSColor colorWithCalibratedRed:0.92 green:0.95 blue:0.92 alpha:1];
             NSImageView *iv = [[NSImageView alloc] initWithFrame:NSMakeRect(6, 6, 24, 24)];
             iv.image = [NSImage imageWithSystemSymbolName:@"crop" accessibilityDescription:nil];
-            iv.contentTintColor = [NSColor colorWithCalibratedRed:0.25 green:0.55 blue:0.35 alpha:1];
+            iv.contentTintColor = XSThemeTintColor([NSColor colorWithCalibratedRed:0.25 green:0.55 blue:0.35 alpha:1]);
             [iconWrap addSubview:iv];
         } else {
-            iconWrap.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.90 green:0.95 blue:1.0 alpha:1].CGColor;
+            iconWrap.baseColor = [NSColor colorWithCalibratedRed:0.90 green:0.95 blue:1.0 alpha:1];
             NSImageView *iv = [[NSImageView alloc] initWithFrame:NSMakeRect(6, 6, 24, 24)];
             iv.image = [NSImage imageWithSystemSymbolName:@"camera.viewfinder" accessibilityDescription:nil];
             iv.contentTintColor = NSColor.controlAccentColor;
@@ -274,7 +303,7 @@ static NSColor *XSCardFill(void) {
                                                   backing:NSBackingStoreBuffered defer:NO];
     win.title = @"xShot 设置";
     win.releasedWhenClosed = NO;
-    win.backgroundColor = XSSettingsBg();
+    win.backgroundColor = XSThemeResolvedColor(XSThemeCanvasColor(), win.effectiveAppearance);
     if (@available(macOS 10.14, *)) {
         win.titleVisibility = NSWindowTitleHidden;
         win.titlebarAppearsTransparent = YES;
@@ -286,8 +315,10 @@ static NSColor *XSCardFill(void) {
 
 - (void)build {
     NSView *root = self.window.contentView;
-    root.wantsLayer = YES;
-    root.layer.backgroundColor = XSSettingsBg().CGColor;
+    XSThemeBackgroundView *background = [[XSThemeBackgroundView alloc] initWithFrame:root.bounds];
+    background.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [root addSubview:background];
+
     _fields = [NSMutableArray array];
 
     // header
